@@ -13,12 +13,12 @@ const {analyzeListing,buildDailySummary}=require('./lib/insights.cjs');
 const {createFxStore,kyivDate,validateDate}=require('./lib/fx.cjs');
 const {planCurrency,currencyRows}=require('./lib/currency.cjs');
 const {createPreferences}=require('./lib/preferences.cjs');
-const {showWindowsNotifications}=require('./lib/notify.cjs');
+const {showWindowsNotifications,getWindowsNotificationStatus}=require('./lib/notify.cjs');
 
 const PUBLIC=path.join(__dirname,'public');
 const APP_ID='domtrack-ua';
-const APP_VERSION='1.2.0';
-const API_VERSION=3;
+const APP_VERSION='1.3.0';
+const API_VERSION=4;
 const MAX_BODY=16*1024*1024;
 const DEFAULTS={stateId:10,cityId:10,cityName:'Київ',regionName:'Київська',kind:'both',enabled:false,intervalMinutes:360,maxListings:15,monthlyBudget:100};
 function error(message,statusCode=400){const e=new Error(message);e.statusCode=statusCode;return e;}
@@ -295,7 +295,7 @@ function createApp(options={}){
     return m.replace(/api_key=[^\s&"']+/gi,'api_key=[скрыт]');
   }
   const monitor=options.monitor||require('./lib/monitor.cjs').createPriceMonitor({store,preferences,fx,getRia,webScanner,ingest:ingestRecords,notify:options.notifier||showWindowsNotifications,intervalMinutes:()=>settings.intervalMinutes,stateFile:path.join(dataDir,'monitor.json'),allListings:()=>allFiltered()});
-  function status(){return {appId:APP_ID,appVersion:APP_VERSION,apiVersion:API_VERSION,desktop:options.desktop===true||process.env.DOMTRACK_DESKTOP==='1',instanceId,dataId,serverPid:process.pid,...store.stats(),onlineSearch,searchProgress:{...searchProgress},apiKeyConfigured:!!apiKey,keyStorage:{stored:keyStored,available:process.platform==='win32',error:keyStorageError},collector:{...collector,settings:{...settings},configured:!!apiKey,quota:quota()},web:{...webState},monitor:monitor.status(),unreadNotifications:preferences.get().notifications.filter(n=>!n.read).length,coverage:{sources:connectedSources(settings.cityName).filter(source=>source.available!==false).map(source=>source.id),additionalApi:'domria',historicalFrom:'first-observation',allInternet:false}};}
+  function status(){return {appId:APP_ID,appVersion:APP_VERSION,apiVersion:API_VERSION,desktopNotifications:getWindowsNotificationStatus(),desktop:options.desktop===true||process.env.DOMTRACK_DESKTOP==='1',instanceId,dataId,serverPid:process.pid,...store.stats(),onlineSearch,searchProgress:{...searchProgress},apiKeyConfigured:!!apiKey,keyStorage:{stored:keyStored,available:process.platform==='win32',error:keyStorageError},collector:{...collector,settings:{...settings},configured:!!apiKey,quota:quota()},web:{...webState},monitor:monitor.status(),unreadNotifications:preferences.get().notifications.filter(n=>!n.read).length,coverage:{sources:connectedSources(settings.cityName).filter(source=>source.available!==false).map(source=>source.id),additionalApi:'domria',historicalFrom:'first-observation',allInternet:false}};}
 
   const server=http.createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff');res.setHeader('Referrer-Policy','no-referrer');

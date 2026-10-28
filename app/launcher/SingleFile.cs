@@ -13,8 +13,8 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("DomTrack UA — один файл")]
 [assembly: AssemblyDescription("Автономный запуск DomTrack UA со встроенным runtime")]
 [assembly: AssemblyProduct("DomTrack UA")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 [assembly: System.Runtime.Versioning.TargetFramework(".NETFramework,Version=v4.6.2", FrameworkDisplayName = ".NET Framework 4.6.2")]
 
 namespace DomTrackSingleFile

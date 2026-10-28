@@ -14,7 +14,7 @@ The proposed source job restores Node.js 24.22.1 and WebView2 SDK 1.0.4314.35 fr
 
 The job runs JS fixture tests with real DPAPI explicitly disabled, then compiles the inner Windows launcher. Its uploaded folder is labelled **unsigned development evidence**, not a release. It does not start the application, its GUI, or native test helpers. Real DPAPI, notifications, native loader/upgrade integration and the final packaged GUI remain separate acceptance checks on an allowed test system. The workflow has no signing secret and cannot publish a release.
 
-Before enabling CI, align `app/package.json.version` with both C# file versions and `server.cjs`. The original package.json says 1.0.0 while the current code says 1.2.0; the source build deliberately refuses that mismatch. Adopt the owner's approved OSS license before describing the repository as open source.
+The current source version is 1.3.0/API4. Keep `app/package.json.version`, both C# file versions and `server.cjs` aligned; the source build refuses mismatches. The selected route is Microsoft Store MSIX, documented in `packaging/msix/README.md`. This private repository has no open-source license or Foundation eligibility; this file is only a historical integration reference.
 
 `windows-2025` is a GitHub-hosted image family, not an immutable toolchain. The compiler and runner image versions are recorded in `ci-provenance.json`. These files establish pinned dependency inputs and a traceable build; they do not claim bit-for-bit reproducibility across runner updates, or across signatures with different timestamps.
 

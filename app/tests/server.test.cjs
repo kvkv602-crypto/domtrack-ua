@@ -118,7 +118,7 @@ test('discovery endpoint matches the live instance and stores no token, key or d
  const file=path.join(dir,'instance.json'),raw=fs.readFileSync(file,'utf8'),endpoint=JSON.parse(raw);
  const status=await req('/api/status').then(r=>r.json());
  assert.deepEqual(Object.keys(endpoint).sort(),['apiVersion','appId','appVersion','dataId','instanceId','port','serverPid']);
- assert.equal(endpoint.appVersion,'1.2.0');assert.equal(endpoint.apiVersion,3);assert.equal(status.appVersion,'1.2.0');assert.equal(status.apiVersion,3);
+ assert.equal(endpoint.appVersion,'1.3.0');assert.equal(endpoint.apiVersion,4);assert.equal(status.appVersion,'1.3.0');assert.equal(status.apiVersion,4);
  assert.equal(endpoint.appId,'domtrack-ua');assert.equal(endpoint.serverPid,process.pid);assert.equal(endpoint.port,app.server.address().port);
  assert.match(endpoint.instanceId,/^[a-f0-9]{32}$/);assert.match(endpoint.dataId,/^[a-f0-9]{64}$/);
  for(const field of ['appId','instanceId','dataId','serverPid'])assert.equal(endpoint[field],status[field]);
@@ -326,7 +326,7 @@ test('contradictory empty and populated pages are retried instead of silently sk
 test('invalid pagination mode is rejected before scanner execution and status marks desktop mode',async t=>{
  let calls=0;const {req}=await setup(t,{desktop:true,webScanner:{scan:async spec=>{calls++;return pagedSource(spec);}}});
  assert.equal((await req('/api/search','POST',{city:'Запорожье',kind:'apartment',mode:'arbitrary'})).status,400);assert.equal(calls,0);
- const status=await req('/api/status').then(r=>r.json());assert.equal(status.desktop,true);assert.equal(status.apiVersion,3);assert.equal(status.appVersion,'1.2.0');
+ const status=await req('/api/status').then(r=>r.json());assert.equal(status.desktop,true);assert.equal(status.apiVersion,4);assert.equal(status.appVersion,'1.3.0');
 });
 
 test('per-page seed indices preserve pagination evidence when diagnostic URLs hide query strings',async t=>{

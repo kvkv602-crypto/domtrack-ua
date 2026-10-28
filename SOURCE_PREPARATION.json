@@ -1,5 +1,5 @@
 {
-  "status": "private-source-prepared-not-signed",
+  "status": "store-source-prepared-awaiting-publisher",
   "repository": "https://github.com/kvkv602-crypto/domtrack-ua",
   "visibility": "private",
   "license": "UNLICENSED",
@@ -12,5 +12,13 @@
     "compiled executables",
     "private signing credentials",
     "private development runtimes"
-  ]
+  ],
+  "apiVersion": 4,
+  "trustedReleaseAvailable": false,
+  "storeCertified": false,
+  "storeSubmitted": false,
+  "storeIdentityAvailable": false,
+  "msixCreated": false,
+  "distribution": "Microsoft Store MSIX, Private audience",
+  "appVersion": "1.3.0"
 }

@@ -10,3 +10,5 @@ This is a private project. No SignPath Foundation application has been submitted
 - No CI job automatically requests signatures, publishes releases or consumes hosted-runner minutes on repository pushes.
 
 Private source hosting does not fix Windows signing. Free SignPath Foundation support requires an eligible open-source project; a different signing/distribution route must be selected while this repository remains private.
+
+The selected route is MSIX through Microsoft Store, initially with Private audience. Store submission requires a verified publisher and exact product identity; new personal registration requires ID/selfie verification by the human owner. The unsigned source folder and any unsigned submission package are preparation artifacts, never a trusted alternative startup path. Store certification/signing and testing of the actual installed package remain required. No Store submission, identity verification or hosted CI run is performed automatically.

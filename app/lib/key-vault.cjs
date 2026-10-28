@@ -4,9 +4,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
+const { selectWindowsHelper } = require('./windows-helper.cjs');
 
 const MAX_BYTES = 64 * 1024;
-const SCRIPT = path.join(__dirname, 'key-vault.ps1');
 const FORMAT = 'domtrack-key-vault';
 class KeyVaultError extends Error {
   constructor(code = 'VAULT_FAILED') {
@@ -31,17 +31,19 @@ function validCipher(value) {
 }
 
 /** Test hook: runner({operation, value}) -> Promise<string>; no shell interpolation. */
-function createPowerShellRunner({ spawnImpl = spawn } = {}) {
+function createProcessRunner({ spawnImpl = spawn, bridgePath, storeMode } = {}) {
   return async function run(input) {
     if (!input || !['protect', 'unprotect'].includes(input.operation) || typeof input.value !== 'string') throw new KeyVaultError('VAULT_HELPER');
     const payload = JSON.stringify({ operation: input.operation, value: input.value });
     if (Buffer.byteLength(payload, 'utf8') > MAX_BYTES) throw new KeyVaultError('VAULT_HELPER');
     const environment = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/(?:api.?key|token|secret|password)/i.test(name)));
-    const executable = path.join(process.env.SystemRoot || process.env.WINDIR || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+    let launch;
+    try { launch = selectWindowsHelper('vault', { bridgePath, storeMode }); }
+    catch { throw new KeyVaultError('VAULT_HELPER'); }
     async function invoke() {
-      const args = ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-File', SCRIPT];
+      const { executable, args } = launch;
       return new Promise((resolve, reject) => {
-        let child; let ended = false; let output = ''; let outputBytes = 0; let errorBytes = 0;
+        let child; let ended = false; const outputChunks = []; let outputBytes = 0; let errorBytes = 0;
         const finish = (error, result) => { if (ended) return; ended = true; clearTimeout(timer); if (error) reject(error); else resolve(result); };
         const timer = setTimeout(() => { child?.kill?.(); finish(new KeyVaultError('VAULT_HELPER')); }, 15000);
         try { child = spawnImpl(executable, args, { windowsHide: true, shell: false, stdio: ['pipe', 'pipe', 'pipe'], env: environment }); }
@@ -50,7 +52,7 @@ function createPowerShellRunner({ spawnImpl = spawn } = {}) {
         child.stdout?.on('data', chunk => {
           outputBytes += Buffer.byteLength(chunk);
           if (outputBytes > MAX_BYTES) { child.kill?.(); finish(new KeyVaultError('VAULT_HELPER')); return; }
-          output += Buffer.from(chunk).toString('utf8');
+          outputChunks.push(Buffer.from(chunk));
         });
         child.stderr?.on('data', chunk => {
           errorBytes += Buffer.byteLength(chunk);
@@ -61,7 +63,7 @@ function createPowerShellRunner({ spawnImpl = spawn } = {}) {
           // A denied script stays denied; never retry its contents through another host mode.
           if (code !== 0) { finish(new KeyVaultError('VAULT_HELPER')); return; }
           try {
-            const result = JSON.parse(output.replace(/^\uFEFF/, '').trim());
+            const result = JSON.parse(Buffer.concat(outputChunks).toString('utf8').replace(/^\uFEFF/, '').trim());
             if (!result || result.ok !== true || typeof result.value !== 'string') throw new Error();
             finish(null, result.value);
           } catch { finish(new KeyVaultError('VAULT_HELPER')); }
@@ -75,7 +77,13 @@ function createPowerShellRunner({ spawnImpl = spawn } = {}) {
   };
 }
 
-function createKeyVault({ file, platform = process.platform, runner = createPowerShellRunner() } = {}) {
+function createPowerShellRunner(options = {}) { return createProcessRunner({ ...options, bridgePath: undefined }); }
+function createWindowsRunner(options = {}) {
+  const bridgePath = Object.hasOwn(options, 'bridgePath') ? options.bridgePath : process.env.DOMTRACK_WINDOWS_BRIDGE;
+  return createProcessRunner({ ...options, bridgePath });
+}
+
+function createKeyVault({ file, platform = process.platform, runner = createWindowsRunner() } = {}) {
   if (typeof file !== 'string' || !file || typeof runner !== 'function') throw new KeyVaultError('VAULT_CONFIG');
   const filename = path.resolve(file);
   let queue = Promise.resolve();
@@ -136,4 +144,4 @@ function createKeyVault({ file, platform = process.platform, runner = createPowe
   return { load, save, remove };
 }
 
-module.exports = { createKeyVault, createPowerShellRunner, KeyVaultError };
+module.exports = { createKeyVault, createPowerShellRunner, createWindowsRunner, KeyVaultError };

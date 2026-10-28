@@ -6,7 +6,7 @@ Privacy policy draft for the private DomTrack UA development project. Maintainer
 
 The app stores observed real-estate listing records and price history, public contact details returned by sources, user-entered listings, favorites, notes, saved searches, watch thresholds, settings, exchange-rate caches and internal notifications on the user's computer. SQLite data and notes are not separately encrypted. The optional RIA API key is protected with Windows DPAPI for the current Windows account; the decrypted key is not returned to the interface. This is not a promise of protection against malware running as that user.
 
-The packaged portable edition uses `%LOCALAPPDATA%\DomTrackUA\data`. A folder development edition may use its own `data` directory or an explicitly configured `DOMTRACK_DATA_DIR`. A WebView2 profile is stored beside the data directory, in `webview`. A bounded launcher log records startup/error diagnostics. Working data and logs are excluded from repository uploads and release artifacts.
+The unpackaged native launcher defaults to `%LOCALAPPDATA%\DomTrackUA\data`. The MSIX launcher uses a separate `%LOCALAPPDATA%\DomTrackUA\store-<package-family-hash>\data` location, stable for the same package family across updates. This prevents accidentally reusing a portable instance or silently importing its data. An explicitly configured local `DOMTRACK_DATA_DIR` must stay outside the installation directory. A WebView2 profile is stored beside the selected data directory in `webview`, or in a separately configured `DOMTRACK_WEBVIEW_DIR`. Starting the development Node server directly can use its source-local `data` directory. MSIX can virtualize per-user storage; the effective installed-package location, upgrade and uninstall behavior still require acceptance testing. No database is silently copied or migrated. A bounded launcher log records startup/error diagnostics. Working data and logs are excluded from repository uploads and release artifacts.
 
 ## Network activity
 
@@ -22,7 +22,7 @@ The app does not itself upload the user's database, notes, favorites or key to a
 
 WebView2 Runtime and the operating system have their own network, update and privacy behavior. Review Microsoft's privacy statement at https://privacy.microsoft.com/privacystatement and OpenStreetMap's policy at https://osmfoundation.org/wiki/Privacy_Policy. Review the relevant listing provider's privacy policy when using that provider; the app is not affiliated with those providers.
 
-The app does not install a Windows service or enable Windows autostart. Closing/stopping it ends scheduled checks. Users can disable configured collection, turn off watches and avoid map/external-link actions. A future installer must show this policy and describe enabled network behavior; the current draft does not claim that installer review has happened.
+The app does not install a Windows service or enable Windows autostart. Closing/stopping it ends scheduled checks. Users can disable configured collection, turn off watches and avoid map/external-link actions. The app includes a Russian privacy summary accessible from its footer. A public policy URL and review of Store disclosure fields are still required before Store submission; installer review and certification have not happened.
 
 ## Retention and removal
 

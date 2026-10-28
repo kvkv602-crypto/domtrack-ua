@@ -13,26 +13,30 @@ using System.Windows.Forms;
 [assembly: AssemblyTitle("DomTrack UA")]
 [assembly: AssemblyDescription("Локальная история цен на жильё — запуск и остановка")]
 [assembly: AssemblyProduct("DomTrack UA")]
-[assembly: AssemblyVersion("1.2.0.0")]
-[assembly: AssemblyFileVersion("1.2.0.0")]
+[assembly: AssemblyVersion("1.3.0.0")]
+[assembly: AssemblyFileVersion("1.3.0.0")]
 
 namespace DomTrackLauncher
 {
     internal static class Program
     {
-        internal static string ActivationName(string identity) { return @"Local\DomTrack-UA-Show-v3-" + identity; }
-        internal static string MutexName(string identity) { return @"Local\DomTrack-UA-Desktop-v3-" + identity; }
+        internal static string ActivationName(string identity) { return @"Local\DomTrack-UA-Show-v4-" + identity; }
+        internal static string MutexName(string identity) { return @"Local\DomTrack-UA-Desktop-v4-" + identity; }
 
         [System.Runtime.InteropServices.DllImport("shell32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
         private static extern int SetCurrentProcessExplicitAppUserModelID(string appId);
 
         [STAThread]
-        private static void Main()
+        private static void Main(string[] args)
         {
+            if (WindowsBridge.TryRun(args)) return;
             AppDomain.CurrentDomain.AssemblyResolve += ResolveWebViewAssembly;
             Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
-            try { SetCurrentProcessExplicitAppUserModelID("DomTrackUA.Desktop"); } catch { }
-            string directory = LauncherContext.ResolveDataDirectory(AppDomain.CurrentDomain.BaseDirectory, Environment.GetEnvironmentVariable("DOMTRACK_DATA_DIR"));
+            // Packaged processes keep the AUMID assigned by the MSIX package model.
+            try { if (LauncherContext.PackageInstallationDirectory() == null) SetCurrentProcessExplicitAppUserModelID("DomTrackUA.Desktop"); } catch { }
+            string directory;
+            try { directory = LauncherContext.ResolveDataDirectory(AppDomain.CurrentDomain.BaseDirectory, Environment.GetEnvironmentVariable("DOMTRACK_DATA_DIR")); }
+            catch { MessageBox.Show("Не удалось выбрать папку данных. Нужен абсолютный локальный путь вне каталога установки, без ссылок и перенаправлений папок. Проверьте DOMTRACK_DATA_DIR.", "DomTrack UA", MessageBoxButtons.OK, MessageBoxIcon.Error); return; }
             string identity = LauncherContext.DataDirectoryId(directory).Substring(0, 24);
             bool created;
             using (EventWaitHandle activation = new EventWaitHandle(false, EventResetMode.AutoReset, ActivationName(identity)))
@@ -40,6 +44,7 @@ namespace DomTrackLauncher
             {
                 if (!created) { activation.Set(); return; }
                 try { using (LauncherContext context = new LauncherContext(AppDomain.CurrentDomain.BaseDirectory, activation)) Application.Run(context); }
+                catch (UserDirectoryException exception) { MessageBox.Show(exception.Message, "DomTrack UA", MessageBoxButtons.OK, MessageBoxIcon.Error); }
                 catch { MessageBox.Show("Не удалось открыть DomTrack UA. Проверьте подготовку файлов и установленный Microsoft Edge WebView2 Runtime. Обычный браузер не запускается.", "DomTrack UA", MessageBoxButtons.OK, MessageBoxIcon.Error); }
                 finally { instance.ReleaseMutex(); }
             }
@@ -52,6 +57,11 @@ namespace DomTrackLauncher
             string file = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "runtime", "webview2", name + ".dll");
             return File.Exists(file) ? Assembly.LoadFrom(file) : null;
         }
+    }
+
+    internal sealed class UserDirectoryException : InvalidOperationException
+    {
+        internal UserDirectoryException(string message) : base(message) { }
     }
 
     internal sealed class IndexResult
@@ -69,7 +79,7 @@ namespace DomTrackLauncher
 
     internal sealed class LauncherContext : ApplicationContext
     {
-        internal const int ApiVersion = 3;
+        internal const int ApiVersion = 4;
         // Negative upgrades an older server, zero reuses this contract, positive rejects a downgrade.
         internal static int ServerCompatibility(int serverApiVersion) { return serverApiVersion.CompareTo(ApiVersion); }
 
@@ -124,7 +134,103 @@ namespace DomTrackLauncher
 
         internal static string ResolveDataDirectory(string folder, string configured)
         {
-            return String.IsNullOrWhiteSpace(configured) ? Path.Combine(Path.GetFullPath(folder), "data") : Path.GetFullPath(configured);
+            string package = PackageInstallationDirectory();
+            return ResolveDataDirectoryAtRoots(folder, configured, Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), package, package == null ? null : CurrentPackageFamilyName());
+        }
+
+        // Unpackaged installs keep the SFX location. MSIX uses a separate, stable
+        // family-specific path; no database is copied or migrated implicitly.
+        internal static string ResolveDataDirectoryAtRoots(string folder, string configured, string localDataRoot, string packageRoot, string packageFamily)
+        {
+            string home = Path.Combine(CanonicalLocalDirectory(localDataRoot), "DomTrackUA");
+            if (!String.IsNullOrWhiteSpace(packageRoot))
+            {
+                if (String.IsNullOrWhiteSpace(packageFamily) || !Regex.IsMatch(packageFamily, @"^[A-Za-z0-9][A-Za-z0-9.\-]*_[A-Za-z0-9]+$"))
+                    throw new UserDirectoryException("Не удалось подтвердить семейство пакета MSIX для отдельной папки данных.");
+                using (SHA256 sha = SHA256.Create())
+                    home = Path.Combine(home, "store-" + BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(packageFamily.ToLowerInvariant()))).Replace("-", "").ToLowerInvariant().Substring(0, 24));
+            }
+            string target = String.IsNullOrWhiteSpace(configured) ? Path.Combine(home, "data") : configured;
+            return ValidateWritableDirectory(folder, packageRoot, target);
+        }
+
+        internal static string ResolveProfileDirectory(string folder, string dataDirectory, string configured)
+        {
+            return ResolveProfileDirectoryAtRoots(folder, dataDirectory, configured, PackageInstallationDirectory());
+        }
+
+        internal static string ResolveProfileDirectoryAtRoots(string folder, string dataDirectory, string configured, string packageRoot)
+        {
+            string data = ValidateWritableDirectory(folder, packageRoot, dataDirectory);
+            string target = String.IsNullOrWhiteSpace(configured) ? Path.Combine(Path.GetDirectoryName(data), "webview") : configured;
+            string profile = ValidateWritableDirectory(folder, packageRoot, target);
+            if (SameOrInside(data, profile)) throw new UserDirectoryException("Профиль WebView2 должен находиться в отдельной папке, не содержащей базу данных.");
+            return profile;
+        }
+
+        private static string CanonicalLocalDirectory(string value)
+        {
+            if (String.IsNullOrWhiteSpace(value) || !Regex.IsMatch(value, @"^[A-Za-z]:[\\/]") || value.IndexOf(':', 2) >= 0 || value.IndexOf('\0') >= 0 || Regex.IsMatch(value, @"(?:^|[\\/])[^\\/]*~[0-9]+(?:[\\/]|$)"))
+                throw new UserDirectoryException("Укажите полный локальный путь папки, например C:\\Users\\Имя\\AppData\\Local\\DomTrackUA\\data. Сетевые, относительные и служебные пути не используются.");
+            string full;
+            try { full = Path.GetFullPath(value); }
+            catch { throw new UserDirectoryException("Некорректный путь папки данных или профиля WebView2."); }
+            string drive = Path.GetPathRoot(full);
+            while (full.Length > drive.Length && (full.EndsWith("\\") || full.EndsWith("/"))) full = full.Substring(0, full.Length - 1);
+            return full;
+        }
+
+        private static bool SameOrInside(string value, string directory)
+        {
+            return String.Equals(value, directory, StringComparison.OrdinalIgnoreCase) || value.StartsWith(directory.TrimEnd('\\', '/') + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        }
+
+        internal static string ValidateWritableDirectory(string folder, string packageRoot, string target)
+        {
+            string application = CanonicalLocalDirectory(folder), directory = CanonicalLocalDirectory(target);
+            if (directory.Length == Path.GetPathRoot(directory).Length || SameOrInside(directory, application) || (!String.IsNullOrWhiteSpace(packageRoot) && SameOrInside(directory, CanonicalLocalDirectory(packageRoot))))
+                throw new UserDirectoryException("Данные и профиль WebView2 должны находиться вне папки установленного приложения и пакета MSIX.");
+            // Reject directory junctions/symlinks instead of following an alias into
+            // package content. No directory is created or fallback attempted here.
+            string current = directory;
+            while (!String.IsNullOrEmpty(current))
+            {
+                if (Directory.Exists(current) || File.Exists(current))
+                {
+                    FileAttributes attributes = File.GetAttributes(current);
+                    if ((attributes & FileAttributes.ReparsePoint) != 0 || (attributes & FileAttributes.Directory) == 0)
+                        throw new UserDirectoryException("Путь данных или профиля содержит ссылку либо файл вместо папки. Выберите отдельную локальную папку.");
+                }
+                current = Path.GetDirectoryName(current);
+            }
+            return directory;
+        }
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int GetCurrentPackagePath(ref uint length, StringBuilder path);
+
+        [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
+        private static extern int GetCurrentPackageFamilyName(ref uint length, StringBuilder name);
+
+        internal static string CurrentPackageFamilyName()
+        {
+            uint length = 0;
+            int result = GetCurrentPackageFamilyName(ref length, null);
+            if (result != 122 || length < 2 || length > 1024) throw new UserDirectoryException("Не удалось определить семейство пакета MSIX.");
+            StringBuilder family = new StringBuilder((int)length);
+            if (GetCurrentPackageFamilyName(ref length, family) != 0) throw new UserDirectoryException("Не удалось определить семейство пакета MSIX.");
+            return family.ToString();
+        }
+
+        internal static string PackageInstallationDirectory()
+        {
+            uint length = 0;
+            int result = GetCurrentPackagePath(ref length, null);
+            if (result == 15700) return null; // APPMODEL_ERROR_NO_PACKAGE: folder/SFX edition.
+            if (result != 122 || length < 2 || length > 32768) throw new UserDirectoryException("Не удалось определить папку пакета MSIX.");
+            StringBuilder package = new StringBuilder((int)length);
+            if (GetCurrentPackagePath(ref length, package) != 0) throw new UserDirectoryException("Не удалось определить папку пакета MSIX.");
+            return CanonicalLocalDirectory(package.ToString());
         }
 
         internal static string UrlFor(int selectedPort)
@@ -262,19 +368,7 @@ namespace DomTrackLauncher
         private string FindNode()
         {
             string bundled = Path.Combine(root, "runtime", "node.exe");
-            if (File.Exists(bundled)) return bundled;
-            string paths = Environment.GetEnvironmentVariable("PATH") ?? "";
-            foreach (string entry in paths.Split(';'))
-            {
-                try
-                {
-                    if (String.IsNullOrWhiteSpace(entry)) continue;
-                    string candidate = Path.GetFullPath(Path.Combine(entry.Trim().Trim('"'), "node.exe"));
-                    if (File.Exists(candidate)) return candidate;
-                }
-                catch { }
-            }
-            return null;
+            return File.Exists(bundled) ? bundled : null;
         }
 
         private static ProcessStartInfo NodeStart(string node, string arguments, string directory)
@@ -284,6 +378,8 @@ namespace DomTrackLauncher
             info.WorkingDirectory = directory; info.RedirectStandardOutput = true; info.RedirectStandardError = true;
             info.StandardOutputEncoding = Encoding.UTF8; info.StandardErrorEncoding = Encoding.UTF8;
             info.EnvironmentVariables.Remove("NODE_OPTIONS"); info.EnvironmentVariables.Remove("NODE_PATH");
+            // Only the packaged launcher chooses the native bridge; the server never searches PATH.
+            info.EnvironmentVariables["DOMTRACK_WINDOWS_BRIDGE"] = Application.ExecutablePath;
             return info;
         }
 
@@ -304,6 +400,7 @@ namespace DomTrackLauncher
         {
             try
             {
+                ValidateWritableDirectory(root, PackageInstallationDirectory(), dataDirectory);
                 IndexResult existing = ReadRunningIndex(dataDirectory, 1200);
                 if (!existing.Ready && RecordedProcessIsAlive(dataDirectory)) throw new InvalidOperationException("Ранее запущенный экземпляр ещё работает, но не отвечает. Дождитесь его завершения или корректно закройте старую программу; новый сервер не запущен, чтобы сохранить целостность базы.");
                 if (existing.Ready && ServerCompatibility(existing.ApiVersion) < 0)

@@ -7,7 +7,8 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const { EventEmitter } = require('node:events');
 const { PassThrough } = require('node:stream');
-const { createKeyVault, createPowerShellRunner } = require('../lib/key-vault.cjs');
+const { createKeyVault, createPowerShellRunner, createWindowsRunner } = require('../lib/key-vault.cjs');
+const { EXPECTED_BRIDGE, STORE_MARKER, readStoreRuntimeMarker } = require('../lib/windows-helper.cjs');
 
 function temporary(t) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'domtrack-vault-test-'));
@@ -133,6 +134,53 @@ test('runner suppresses arbitrary stderr and malformed helper output', async () 
     const runner = createPowerShellRunner({ spawnImpl: fakeSpawner(({ child }) => { child.stderr.end(secret); child.stdout.end(fail ? '' : secret); child.emit('close', fail ? 1 : 0); }) });
     await assert.rejects(runner({ operation: 'protect', value: secret }), error => error.code === 'VAULT_HELPER' && !error.message.includes(secret));
   }
+});
+
+test('native vault uses only the packaged sibling EXE with the request in stdin',async()=>{
+ const calls=[],key='native-synthetic-secret-Пример';
+ const runner=createWindowsRunner({bridgePath:EXPECTED_BRIDGE,spawnImpl:fakeSpawner(request=>{calls.push(request);request.child.stdout.end(JSON.stringify({ok:true,value:'cipher-fixture'}));request.child.emit('close',0);})});
+ assert.equal(await runner({operation:'protect',value:key}),'cipher-fixture');assert.equal(calls.length,1);
+ const call=calls[0];assert.equal(call.file,EXPECTED_BRIDGE);assert.deepEqual(call.args,['--windows-helper','vault']);
+ assert.deepEqual(JSON.parse(call.input),{operation:'protect',value:key});assert.equal(JSON.stringify(call.args).includes(key),false);assert.equal(JSON.stringify(call.options.env).includes(key),false);
+ assert.equal(call.options.windowsHide,true);assert.equal(call.options.shell,false);assert.equal(call.args.some(arg=>/powershell|-file|-command|executionpolicy/i.test(arg)),false);
+});
+
+test('present but invalid native bridge paths fail before any launch or PowerShell fallback',async()=>{
+ for(const bridgePath of ['',null,'DomTrack-UA.exe',path.join(os.tmpdir(),'DomTrack-UA.exe'),EXPECTED_BRIDGE+'-other.exe','\\\\server\\share\\DomTrack-UA.exe']){
+  let calls=0;const runner=createWindowsRunner({bridgePath,spawnImpl:()=>{calls++;throw Error('Must not launch');}});
+  await assert.rejects(runner({operation:'protect',value:'synthetic-native-test'}),{code:'VAULT_HELPER'});assert.equal(calls,0);
+ }
+});
+
+test('native bridge denial rejects once without a PowerShell retry and preserves ciphertext',async t=>{
+ const {file}=temporary(t),mock=mockRunner();await createKeyVault({file,platform:'win32',runner:mock.runner}).save('synthetic-old-native');
+ const before=fs.readFileSync(file,'utf8'),calls=[];
+ const runner=createWindowsRunner({bridgePath:EXPECTED_BRIDGE,spawnImpl:fakeSpawner(request=>{calls.push(request);request.child.stderr.end('denied synthetic-new-native');request.child.emit('close',1);})});
+ await assert.rejects(createKeyVault({file,platform:'win32',runner}).save('synthetic-new-native'),error=>error.code==='VAULT_SAVE'&&!error.message.includes('synthetic-new-native'));
+ assert.equal(calls.length,1);assert.equal(calls[0].file,EXPECTED_BRIDGE);assert.deepEqual(calls[0].args,['--windows-helper','vault']);assert.equal(fs.readFileSync(file,'utf8'),before);
+});
+
+test('the default vault runner honors the explicit launcher bridge environment',async t=>{
+ const previous=process.env.DOMTRACK_WINDOWS_BRIDGE;process.env.DOMTRACK_WINDOWS_BRIDGE='relative-denied-bridge.exe';
+ try{const {file}=temporary(t);await assert.rejects(createKeyVault({file,platform:'win32'}).save('synthetic-only'),{code:'VAULT_SAVE'});assert.equal(fs.existsSync(file),false);}
+ finally{if(previous===undefined)delete process.env.DOMTRACK_WINDOWS_BRIDGE;else process.env.DOMTRACK_WINDOWS_BRIDGE=previous;}
+});
+
+test('native unprotect decodes UTF-8 correctly across arbitrary pipe chunks',async()=>{
+ const key='Синтетичний-ключ-😀';
+ const runner=createWindowsRunner({bridgePath:EXPECTED_BRIDGE,spawnImpl:fakeSpawner(({child})=>{const bytes=Buffer.from(JSON.stringify({ok:true,value:key}),'utf8');for(const byte of bytes)child.stdout.write(Buffer.from([byte]));child.emit('close',0);})});
+ assert.equal(await runner({operation:'unprotect',value:'Y2lwaGVy'}),key);
+});
+
+test('Store mode without a launcher-provided bridge fails without starting PowerShell',async()=>{
+ let calls=0;const runner=createWindowsRunner({storeMode:true,bridgePath:undefined,spawnImpl:()=>{calls++;throw Error('Must not launch');}});
+ await assert.rejects(runner({operation:'protect',value:'synthetic-store-only'}),{code:'VAULT_HELPER'});assert.equal(calls,0);
+});
+test('the generated Store marker is bounded, schema checked and fails closed on read errors',()=>{
+ const fixture=(value,size)=>{const bytes=Buffer.from(JSON.stringify(value));return{openSync:file=>{assert.equal(file,STORE_MARKER);return 3;},fstatSync:()=>({isFile:()=>true,size:size??bytes.length}),readSync:(_file,buffer,offset,length,position)=>{const count=Math.min(length,Math.max(0,bytes.length-position));bytes.copy(buffer,offset,position,position+count);return count;},closeSync(){}};};
+ assert.equal(readStoreRuntimeMarker(fixture({format:'domtrack-store-runtime',version:1})),true);
+ for(const fake of [fixture({format:'wrong',version:1}),fixture({format:'domtrack-store-runtime',version:2}),fixture({format:'domtrack-store-runtime',version:1,extra:true}),fixture({format:'domtrack-store-runtime',version:1},1025),fixture('x'.repeat(2048),20),{openSync(){throw Object.assign(Error('Denied'),{code:'EACCES'});}}])assert.throws(()=>readStoreRuntimeMarker(fake),{code:'WINDOWS_BRIDGE_CONFIG'});
+ assert.equal(readStoreRuntimeMarker({openSync(){throw Object.assign(Error('Missing'),{code:'ENOENT'});}}),false);
 });
 // This integration case starts a real PowerShell script. Default fixture runs
 // never execute it; a trusted/signed test environment must explicitly opt in.

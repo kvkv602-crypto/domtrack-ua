@@ -28,7 +28,8 @@ namespace DomTrackLauncher
         internal AppWindow(string root, string dataDirectory, Icon icon)
         {
             applicationRoot = Path.GetFullPath(root);
-            profileDirectory = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(dataDirectory)), "webview");
+            profileDirectory = LauncherContext.ResolveProfileDirectory(applicationRoot, dataDirectory, Environment.GetEnvironmentVariable("DOMTRACK_WEBVIEW_DIR"));
+            ValidateProfileOverride(applicationRoot, profileDirectory, LauncherContext.PackageInstallationDirectory(), Environment.GetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER"));
             Text = "DomTrack UA"; StartPosition = FormStartPosition.CenterScreen;
             Rectangle workingArea = Screen.PrimaryScreen.WorkingArea;
             ClientSize = new Size(Math.Min(1280, Math.Max(360, workingArea.Width - 48)), Math.Min(850, Math.Max(300, workingArea.Height - 88)));
@@ -61,11 +62,16 @@ namespace DomTrackLauncher
             try
             {
                 CoreWebView2Environment.SetLoaderDllFolderPath(Path.Combine(applicationRoot, "runtime", "webview2"));
+                LauncherContext.ValidateWritableDirectory(applicationRoot, LauncherContext.PackageInstallationDirectory(), profileDirectory);
+                ValidateProfileOverride(applicationRoot, profileDirectory, LauncherContext.PackageInstallationDirectory(), Environment.GetEnvironmentVariable("WEBVIEW2_USER_DATA_FOLDER"));
                 Directory.CreateDirectory(profileDirectory);
                 CoreWebView2EnvironmentOptions options = new CoreWebView2EnvironmentOptions();
                 options.Language = "ru-RU"; options.AllowSingleSignOnUsingOSPrimaryAccount = false;
                 CoreWebView2Environment environment = await CoreWebView2Environment.CreateAsync(null, profileDirectory, options);
                 if (IsDisposed) return;
+                // WebView2 policy/environment overrides may supersede the argument.
+                // Verify the actual folder before creating a control or loading app data.
+                ValidateEffectiveProfile(applicationRoot, profileDirectory, LauncherContext.PackageInstallationDirectory(), environment.UserDataFolder);
                 await view.EnsureCoreWebView2Async(environment);
                 if (IsDisposed) return;
                 CoreWebView2 core = view.CoreWebView2;
@@ -86,11 +92,11 @@ namespace DomTrackLauncher
                 core.ProcessFailed += delegate { if (!IsDisposed) { SetStatus("Встроенное окно завершило работу. Закройте и снова запустите DomTrack UA; база и настройки сохранены."); } };
                 initialized = true; core.Navigate(origin.AbsoluteUri);
             }
-            catch
+            catch (Exception error)
             {
                 if (!IsDisposed)
                 {
-                    SetStatus("Не удалось открыть встроенное окно приложения. Для него нужен Microsoft Edge WebView2 Runtime. Проверьте его наличие и перезапустите DomTrack UA. Обычный браузер автоматически не запускается.");
+                    SetStatus(error is UserDirectoryException ? error.Message + " Исправьте настройки пути и перезапустите DomTrack UA." : "Не удалось открыть встроенное окно приложения. Для него нужен Microsoft Edge WebView2 Runtime. Проверьте его наличие и перезапустите DomTrack UA. Обычный браузер автоматически не запускается.");
                     retry.Visible = true;
                 }
             }
@@ -101,6 +107,20 @@ namespace DomTrackLauncher
         {
             Uri candidate;
             return applicationOrigin != null && Uri.TryCreate(value, UriKind.Absolute, out candidate) && candidate.Scheme == Uri.UriSchemeHttp && candidate.Host == "127.0.0.1" && candidate.Port == applicationOrigin.Port && String.IsNullOrEmpty(candidate.UserInfo);
+        }
+
+        internal static void ValidateProfileOverride(string root, string expectedProfile, string packageRoot, string overrideProfile)
+        {
+            if (String.IsNullOrWhiteSpace(overrideProfile)) return;
+            string actual = LauncherContext.ValidateWritableDirectory(root, packageRoot, overrideProfile);
+            if (!String.Equals(actual, expectedProfile, StringComparison.OrdinalIgnoreCase))
+                throw new UserDirectoryException("Настройка WebView2 UserDataFolder конфликтует с выбранным профилем DomTrack UA. Используйте DOMTRACK_WEBVIEW_DIR и согласованный путь профиля.");
+        }
+
+        internal static void ValidateEffectiveProfile(string root, string expectedProfile, string packageRoot, string actualProfile)
+        {
+            if (String.IsNullOrWhiteSpace(actualProfile)) throw new UserDirectoryException("Не удалось подтвердить фактическую папку профиля WebView2.");
+            ValidateProfileOverride(root, expectedProfile, packageRoot, actualProfile);
         }
 
         internal static bool IsExternalWebUri(string value)
