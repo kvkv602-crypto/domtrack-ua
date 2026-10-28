@@ -1,4 +1,4 @@
-# Copy to .github/workflows/build.yml in the reviewed public repository.
+# Manual source CI for the owner's private repository.
 # This is a source-CI workflow. It does not submit signing requests or publish releases.
 name: Source CI (unsigned, not a release)
 
