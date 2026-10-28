@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title">
+  <title id="title">DomTrack UA</title>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="#142e3f"/>
+  <path fill="#fff" fill-rule="evenodd" d="M68 58h45c49 0 77 26 77 70s-28 70-77 70H68V58zm28 26v88h15c33 0 51-16 51-44s-18-44-51-44H96z"/>
+  <circle cx="199" cy="58" r="13" fill="#087e78"/>
+</svg>

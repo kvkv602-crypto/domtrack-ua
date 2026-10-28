@@ -1,0 +1,18 @@
+{
+  "name": "domtrack-ua",
+  "version": "1.2.0",
+  "private": true,
+  "description": "Local Ukrainian residential sale listings and observed price history",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node server.cjs",
+    "test": "node --test --test-isolation=none tests/*.test.cjs"
+  },
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kvkv602-crypto/domtrack-ua.git"
+  }
+}

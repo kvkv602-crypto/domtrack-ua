@@ -1,0 +1,16 @@
+{
+  "status": "private-source-prepared-not-signed",
+  "repository": "https://github.com/kvkv602-crypto/domtrack-ua",
+  "visibility": "private",
+  "license": "UNLICENSED",
+  "signPathFoundationApplicationSubmitted": false,
+  "automaticCi": false,
+  "excluded": [
+    "user databases",
+    "API keys",
+    "logs",
+    "compiled executables",
+    "private signing credentials",
+    "private development runtimes"
+  ]
+}

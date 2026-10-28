@@ -1,0 +1,4 @@
+source;externalId;url;title;city;region;kind;price;currency;area;rooms;floor;floorsTotal;observedAt
+example;example-1;;Учебная квартира — не реальное объявление;Київ;Київська;apartment;80000;USD;60;2;4;9;2026-10-01T09:00:00Z
+example;example-1;;Учебная квартира — не реальное объявление;Київ;Київська;apartment;76000;USD;60;2;4;9;2026-10-10T09:00:00Z
+example;example-2;;Учебный дом — не реальное объявление;Ірпінь;Київська;house;120000;USD;140;4;;2;2026-10-10T09:00:00Z

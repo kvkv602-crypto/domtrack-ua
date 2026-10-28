@@ -1,0 +1,49 @@
+# Copy to .github/workflows/build.yml in the reviewed public repository.
+# This is a source-CI workflow. It does not submit signing requests or publish releases.
+name: Source CI (unsigned, not a release)
+
+'on':
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-ci:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOMTRACK_TEST_REAL_DPAPI: '0'
+      DOMTRACK_DISABLE_DESKTOP: '1'
+    steps:
+      - name: Check out reviewed source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, verified 2026-10-28
+        with:
+          persist-credentials: false
+      - name: Restore official pinned dependencies
+        run: ./ci/Restore-Dependencies.ps1 -AppRoot ./app -DownloadDirectory ./.build/downloads
+      - name: Test JavaScript without real Windows helper execution
+        run: |
+          New-Item -ItemType Directory -Path reports -Force | Out-Null
+          & ./app/runtime/node.exe --test --test-isolation=none --test-reporter=junit --test-reporter-destination=reports/js-tests.xml 'app/tests/*.test.cjs'
+          if ($LASTEXITCODE -ne 0) { throw 'JavaScript tests failed.' }
+      - name: Compile unsigned native source folder
+        run: ./ci/Build-Source.ps1 -AppRoot ./app -OutputDirectory ./dist/unsigned
+      - name: Upload unsigned CI evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7, verified 2026-10-28
+        with:
+          name: domtrack-source-ci-unsigned-${{ github.sha }}
+          path: dist/unsigned/
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload test report, including skipped integrations
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: domtrack-source-ci-tests-${{ github.sha }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 14

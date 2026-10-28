@@ -1,0 +1,25 @@
+# Local data and credentials
+**/data/
+**/*.sqlite*
+**/*.enc.json
+**/instance.json
+**/.env
+**/.env.*
+**/*.log
+**/*.pfx
+**/*.p12
+**/*.key
+**/*.pem
+# Upstream binaries are restored from fixed public hashes in CI.
+/app/runtime/
+**/*.exe
+**/*.dll
+**/*.zip
+/.build/
+/work/
+/dist/
+/reports/
+/.vscode/
+
+/node_modules/
+/app/node_modules/
