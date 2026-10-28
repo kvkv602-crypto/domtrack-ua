@@ -1,6 +1,6 @@
 # Third-party components — review notes
 
-This is an inventory for the proposed public project, not a new license grant. Preserve upstream license/notice files byte-for-byte. The owner must confirm the license for DomTrack's own code before publication; the current application metadata still says `UNLICENSED`.
+Inventory for the private project. The project own code remains UNLICENSED/all rights reserved; this does not change upstream license grants. Preserve upstream license and notice files byte-for-byte.
 
 | Component | Observed version / provenance | License and public-build action |
 |---|---|---|

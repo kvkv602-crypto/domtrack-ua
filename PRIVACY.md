@@ -1,12 +1,12 @@
 # Privacy policy — draft
 
-Draft for the proposed public DomTrack UA repository. Maintainer/contact: `https://github.com/kvkv602-crypto`. Repository: `https://github.com/kvkv602-crypto/domtrack-ua`. Replace these fields and review the policy before publication.
+Privacy policy draft for the private DomTrack UA development project. Maintainer/contact: `https://github.com/kvkv602-crypto`. Repository: `https://github.com/kvkv602-crypto/domtrack-ua`. The owner must review this policy before any signed end-user release.
 
 ## Local information
 
 The app stores observed real-estate listing records and price history, public contact details returned by sources, user-entered listings, favorites, notes, saved searches, watch thresholds, settings, exchange-rate caches and internal notifications on the user's computer. SQLite data and notes are not separately encrypted. The optional RIA API key is protected with Windows DPAPI for the current Windows account; the decrypted key is not returned to the interface. This is not a promise of protection against malware running as that user.
 
-The packaged portable edition uses `%LOCALAPPDATA%\DomTrackUA\data`. A folder development edition may use its own `data` directory or an explicitly configured `DOMTRACK_DATA_DIR`. A WebView2 profile is stored beside the data directory, in `webview`. A bounded launcher log records startup/error diagnostics. Working data and logs are excluded from public source packages and release artifacts.
+The packaged portable edition uses `%LOCALAPPDATA%\DomTrackUA\data`. A folder development edition may use its own `data` directory or an explicitly configured `DOMTRACK_DATA_DIR`. A WebView2 profile is stored beside the data directory, in `webview`. A bounded launcher log records startup/error diagnostics. Working data and logs are excluded from repository uploads and release artifacts.
 
 ## Network activity
 
