@@ -217,18 +217,18 @@ final class Scanner {
                     JSONObject r = monitored.get(
                         Math.floorMod(watchCursor + watchIndex, monitored.size())
                     );
-                    db.state("watchCursor", Json.object("next", watchCursor + watchIndex + 1));
                     if (
                         checked >= 2 ||
                         stop.getAsBoolean() ||
                         System.currentTimeMillis() - started >= limit
                     ) break;
+                    db.state("watchCursor", Json.object("next", watchCursor + watchIndex + 1));
                     JSONObject watch = r.optJSONObject("watch");
                     if (watch == null || !watch.optBoolean("enabled", true)) continue;
-                    checked++;
                     try {
                         String url = r.optString("catalogUrl", r.optString("url"));
                         if (!seenWatchPages.add(url)) continue;
+                        checked++;
                         if (net.robotsAllowed(url, db)) {
                             Network.Page response = net.get(url);
                             if (r.optBoolean("structured")) imported += db.ingest(

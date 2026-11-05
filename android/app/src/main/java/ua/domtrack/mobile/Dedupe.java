@@ -73,33 +73,34 @@ final class Dedupe {
         aw.removeAll(words(a.optString("city") + " " + a.optString("address")));
         bw.removeAll(words(b.optString("city") + " " + b.optString("address")));
         long common = aw.stream().filter(bw::contains).count();
-        boolean title = common >= 4 && (double) common / (aw.size() + bw.size() - common) >= .7;
+        double similarity = common == 0 ? 0 : (double) common / (aw.size() + bw.size() - common);
+        boolean title = common >= 4 && similarity >= .7;
         String ap = a.optString("contactPhone").replaceAll("\\D", ""),
             bp = b.optString("contactPhone").replaceAll("\\D", "");
         if (ap.startsWith("0") && ap.length() == 10) ap = "38" + ap;
         if (bp.startsWith("0") && bp.length() == 10) bp = "38" + bp;
         boolean phone = ap.matches("380[0-9]{9}") && ap.equals(bp);
-        if (!title && !phone) return out;
+        double x = Model.convert(a.optDouble("price"), a.optString("currency"), "UAH", quote),
+            y = Model.convert(b.optDouble("price"), b.optString("currency"), "UAH", quote);
+        boolean dated = Double.isFinite(x) && Double.isFinite(y) && Math.min(x, y) > 0;
+        if (!dated && a.optString("currency").equals(b.optString("currency"))) {
+            x = a.optDouble("price");
+            y = b.optDouble("price");
+        }
+        double gap = Double.isFinite(x) && Double.isFinite(y) && Math.min(x, y) > 0
+            ? Math.abs(x - y) / Math.min(x, y)
+            : Double.NaN;
+        boolean priceSupport = common >= 3 && similarity >= .6 && gap <= .15;
+        if (!title && !phone && !priceSupport) return out;
         out.add("Совпадают адрес, комнаты, площадь и известные этажи");
         if (title) out.add("Близкие содержательные слова независимо от порядка");
         if (phone) out.add("Совпадает открытый телефон");
-        double x = Model.convert(a.optDouble("price"), a.optString("currency"), "UAH", quote),
-            y = Model.convert(b.optDouble("price"), b.optString("currency"), "UAH", quote);
-        if (Double.isFinite(x) && Double.isFinite(y) && Math.min(x, y) > 0) out.add(
-            String.format(
-                Locale.ROOT,
-                "Разница цен по одному курсу НБУ: %.1f%%",
-                (Math.abs(x - y) / Math.min(x, y)) * 100
-            )
+        if (priceSupport && !title) out.add("Сходство формулировок подкреплено близкой ценой");
+        if (dated) out.add(
+            String.format(Locale.ROOT, "Разница цен по одному курсу НБУ: %.1f%%", gap * 100)
         );
-        else if (a.optString("currency").equals(b.optString("currency"))) out.add(
-            String.format(
-                Locale.ROOT,
-                "Разница исходных цен: %.1f%%",
-                (Math.abs(a.optDouble("price") - b.optDouble("price")) /
-                        Math.min(a.optDouble("price"), b.optDouble("price"))) *
-                    100
-            )
+        else if (Double.isFinite(gap)) out.add(
+            String.format(Locale.ROOT, "Разница исходных цен: %.1f%%", gap * 100)
         );
         return out;
     }

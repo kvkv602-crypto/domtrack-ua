@@ -80,8 +80,8 @@ final class Network {
             body = b;
             url = u;
             status = s;
-            etag = e;
-            modified = m;
+            etag = e == null ? "" : e;
+            modified = m == null ? "" : m;
         }
     }
 

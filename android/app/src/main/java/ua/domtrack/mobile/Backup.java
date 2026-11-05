@@ -87,7 +87,9 @@ final class Backup {
                 "watch",
                 "visited",
                 "hidden",
-                "sameGroup"
+                "sameGroup",
+                "differentGroup",
+                "checklist"
             ))
                 if (r.has(k)) db.local(id, k, r.opt(k));
         }

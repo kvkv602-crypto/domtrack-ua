@@ -215,4 +215,52 @@ public class CoreTest {
         assertEquals(2, r.get(0).optJSONArray("confirmedAlternatives").length());
         assertEquals(12000, a.optDouble("price"), .01);
     }
+
+    @Test
+    public void reorderedPhrasesRemainCandidatesWithDifferentPrices() {
+        JSONObject a = listing(),
+            b = listing();
+        Json.put(a, "address", "вул. Перемоги, 12");
+        Json.put(b, "address", "Перемоги вул., 12");
+        Json.put(a, "title", "Терраса библиотека камин панорамный");
+        Json.put(b, "title", "Панорамный камином библиотекой террасой");
+        Json.put(b, "price", 20000);
+        assertFalse(Dedupe.evidence(a, b, quote()).isEmpty());
+    }
+
+    @Test
+    public void closePriceSupportsWeakerWordingOnlyAfterPhysicalChecks() {
+        JSONObject a = listing(),
+            b = listing();
+        Json.put(a, "address", "Перемоги, 12");
+        Json.put(b, "address", "Перемоги, 12");
+        Json.put(a, "title", "Терраса библиотека камин");
+        Json.put(b, "title", "Камином террасой библиотекой");
+        Json.put(b, "price", 10000);
+        Json.put(b, "currency", "EUR");
+        assertFalse(Dedupe.evidence(a, b, quote()).isEmpty());
+        assertTrue(Dedupe.evidence(a, b, null).isEmpty());
+        Json.put(b, "floor", 5);
+        assertTrue(Dedupe.evidence(a, b, quote()).isEmpty());
+    }
+
+    @Test
+    public void equalPriceAndGenericTitleNeverIdentifyAnObject() {
+        JSONObject a = listing(),
+            b = listing();
+        Json.put(a, "address", "Перемоги, 12");
+        Json.put(b, "address", "Перемоги, 12");
+        Json.put(a, "title", "Продажа квартиры");
+        Json.put(b, "title", "Квартиры продажа");
+        assertTrue(Dedupe.evidence(a, b, quote()).isEmpty());
+    }
+
+    @Test
+    public void numericStreetNamesStaySeparate() {
+        JSONObject a = listing(),
+            b = listing();
+        Json.put(a, "address", "40 лет Победы, 12");
+        Json.put(b, "address", "50 лет Победы, 12");
+        assertNotEquals(Dedupe.address(a), Dedupe.address(b));
+    }
 }
