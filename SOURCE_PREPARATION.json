@@ -1,24 +1,22 @@
 {
-  "status": "store-source-prepared-awaiting-publisher",
+  "status": "mit-source-approved-awaiting-publication",
   "repository": "https://github.com/kvkv602-crypto/domtrack-ua",
   "visibility": "private",
-  "license": "UNLICENSED",
+  "license": "MIT",
+  "proposedLicense": "MIT",
+  "publicationApprovalPending": false,
+  "publicationApproved": true,
   "signPathFoundationApplicationSubmitted": false,
+  "signPathFoundationApproved": false,
+  "signingServiceConfigured": false,
   "automaticCi": false,
-  "excluded": [
-    "user databases",
-    "API keys",
-    "logs",
-    "compiled executables",
-    "private signing credentials",
-    "private development runtimes"
-  ],
+  "excluded": ["user databases", "API keys", "logs", "compiled executables", "private signing credentials", "private development runtimes"],
   "apiVersion": 4,
   "trustedReleaseAvailable": false,
   "storeCertified": false,
   "storeSubmitted": false,
   "storeIdentityAvailable": false,
   "msixCreated": false,
-  "distribution": "Microsoft Store MSIX, Private audience",
+  "distribution": "GitHub releases with SignPath Foundation signing (proposed)",
   "appVersion": "1.3.0"
 }

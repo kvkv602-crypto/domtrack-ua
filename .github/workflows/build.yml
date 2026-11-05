@@ -1,6 +1,6 @@
-# Manual source CI for the owner's private repository.
-# This is a source-CI workflow. It does not submit signing requests or publish releases.
-name: Source CI (unsigned, not a release)
+# Manual source CI and explicitly unsigned single-file development preview.
+# No signing request or GitHub release publication is performed by this workflow.
+name: Source CI and unsigned development preview
 
 'on':
   workflow_dispatch:
@@ -25,18 +25,22 @@ jobs:
           persist-credentials: false
       - name: Restore official pinned dependencies
         run: ./ci/Restore-Dependencies.ps1 -AppRoot ./app -DownloadDirectory ./.build/downloads
+      - name: Check signing boundaries and unsigned preview contracts
+        run: |
+          ./ci/Test-SignPathBuild.ps1
+          ./ci/Test-DevelopmentPreview.ps1
       - name: Test JavaScript without real Windows helper execution
         run: |
           New-Item -ItemType Directory -Path reports -Force | Out-Null
           & ./app/runtime/node.exe --test --test-isolation=none --test-reporter=junit --test-reporter-destination=reports/js-tests.xml 'app/tests/*.test.cjs'
           if ($LASTEXITCODE -ne 0) { throw 'JavaScript tests failed.' }
-      - name: Compile unsigned native source folder
-        run: ./ci/Build-Source.ps1 -AppRoot ./app -OutputDirectory ./dist/unsigned
-      - name: Upload unsigned CI evidence
+      - name: Compile and verify the native-only unsigned single-file preview
+        run: ./ci/Build-DevelopmentPreview.ps1 -AppRoot ./app -OutputDirectory ./dist/development
+      - name: Upload immutable unsigned development preview and evidence
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7, verified 2026-10-28
         with:
-          name: domtrack-source-ci-unsigned-${{ github.sha }}
-          path: dist/unsigned/
+          name: domtrack-development-unsigned-${{ github.sha }}
+          path: dist/development/preview/
           if-no-files-found: error
           retention-days: 14
       - name: Upload test report, including skipped integrations

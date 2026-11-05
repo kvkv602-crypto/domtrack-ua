@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Review and create this configuration in the approved SignPath project.
+     GitHub upload-artifact wraps this single owned launcher in a ZIP. -->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <parameters><parameter name="version" required="true" /></parameters>
+  <zip-file>
+    <pe-file path="DomTrack-UA.exe" product-name="DomTrack UA" product-version="${version}" file-version="${version}">
+      <authenticode-sign hash-algorithm="sha256" description="DomTrack UA" />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>

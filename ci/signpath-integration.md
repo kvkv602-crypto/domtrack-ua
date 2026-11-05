@@ -1,56 +1,58 @@
-# Private-project status
+# GitHub and SignPath Foundation integration preparation
 
-The owner selected private source hosting. The free SignPath Foundation route below is not applicable under the current visibility. This is retained technical reference only; no account, token, signing policy or request is configured.
+This document describes the prepared 1.3.0/API4 release path. The owner has approved public source publication under MIT. The exact approved license has been activated in the root LICENSE, app/LICENSE and package metadata; the repository visibility change is pending completion. No Foundation application, approval, certificate, signing policy, hosted signing run or signed release exists yet. Publication approval is not Foundation approval.
 
-# Source CI and proposed SignPath integration
+## Publication prerequisites
 
-Draft prepared on 2026-10-28. No repository, signing account, request or release has been created by these files. There is no SignPath approval or certificate yet.
+The owner has approved the reviewed source publication and exact MIT license. Inspect the complete Git history and repository artifacts before completing the visibility change. Do not publish a user's database, RIA API key, private logs, account-registration material, signing credentials or old local binaries.
 
-## Repository layout and current source CI
+The Foundation also assesses the project's release history, maintenance and reputation. It requires a released application in the intended distribution form. A newly public project has no guaranteed entitlement to signing. If an unsigned development preview is prepared to document the package format, label it explicitly as unsigned and do not claim it will run on protected Windows devices. No adoption, download count, release or independent review should be invented for an application.
 
-Use `app/` for reviewed app sources, `ci/` for these scripts, and copy `build.yml` to `.github/workflows/build.yml`. Do not copy the old EXEs, local Codex runtime, SQLite databases, encrypted keys, logs or registration material into the public repository. Keep the vendored parse5/entities sources and their original notices.
+The proposed maintainer/reviewer/approver is [kvkv602-crypto](https://github.com/kvkv602-crypto). See the [code signing policy](../CODE_SIGNING_POLICY.md), [privacy policy](../PRIVACY.md) and [third-party notices](../THIRD_PARTY_NOTICES.md). The separate Store/MSIX preparation is retained but is not the selected application route.
 
-The proposed source job restores Node.js 24.22.1 and WebView2 SDK 1.0.4314.35 from their official origins. Their checksums are fixed in `dependency-lock.json`, rather than fetched anew and blindly trusted on each build. The official Node executable has a different digest from the local Codex/OpenAI-signed runtime. The local runtime must not be used as the public dependency.
+## Build inputs and native-only payload
 
-The job runs JS fixture tests with real DPAPI explicitly disabled, then compiles the inner Windows launcher. Its uploaded folder is labelled **unsigned development evidence**, not a release. It does not start the application, its GUI, or native test helpers. Real DPAPI, notifications, native loader/upgrade integration and the final packaged GUI remain separate acceptance checks on an allowed test system. The workflow has no signing secret and cannot publish a release.
+The source CI restores official Node.js 24.22.1 and Microsoft.Web.WebView2 SDK 1.0.4314.35. The archive digests, expected official Node executable digest and Action commits are recorded in [dependency-lock.json](dependency-lock.json). Vendor signatures and notices must be preserved. The environment-specific development runtime is not used as a release dependency.
 
-The current source version is 1.3.0/API4. Keep `app/package.json.version`, both C# file versions and `server.cjs` aligned; the source build refuses mismatches. The selected route is Microsoft Store MSIX, documented in `packaging/msix/README.md`. This private repository has no open-source license or Foundation eligibility; this file is only a historical integration reference.
+The proposed SignPath payload uses the same explicit application-file allowlist as MSIX preparation, plus a strict runtime marker requiring the native helper. The marker's internal filename/format contains `store`; in this release it only enforces the native-helper requirement and does not make the executable an MSIX or a Microsoft Store product. The payload excludes legacy `key-vault.ps1` and `notify.ps1` scripts, development launchers, tests and build inputs. The 1.3 launcher performs DPAPI and notification operations through its bounded native bridge. A missing or denied bridge fails closed.
 
-`windows-2025` is a GitHub-hosted image family, not an immutable toolchain. The compiler and runner image versions are recorded in `ci-provenance.json`. These files establish pinned dependency inputs and a traceable build; they do not claim bit-for-bit reproducibility across runner updates, or across signatures with different timestamps.
+The pinned SDK assemblies and x64 loader are build/runtime libraries; they are not the installed Microsoft Edge WebView2 browser Runtime. The latter remains a separate system prerequisite with its own terms.
 
-## Why the SFX needs two signing phases
+## Two separate signing stages
 
-The current single-file EXE embeds `DomTrack.Payload` and `DomTrack.Manifest`; the latter contains hashes of all inner files. Signing an inner EXE or PowerShell script after those hashes are sealed would invalidate the package. Signing only the outer EXE would leave the inner launcher and helpers untrusted.
+The self-extracting format includes a payload ZIP and a manifest of exact inner bytes. Signing the inner executable after sealing those hashes would invalidate the package. Signing only the outer executable would leave the inner launcher unsigned.
 
-The proposed release sequence is:
+The proposed manual workflow therefore has these stages:
 
-1. Build the reviewed inner runtime folder in a GitHub-hosted job. Upload it as an immutable workflow artifact.
-2. Submit that artifact to the approved SignPath **payload** configuration. Sign only the project's own `DomTrack-UA.exe`, `lib/key-vault.ps1` and `lib/notify.ps1`. Verify existing Node/WebView2 signatures and retain their publishers. SignPath supports separate PE and PowerShell file elements; do not apply the project certificate to third-party code.
-3. Download the approved signed result into a new staging directory. Check allowed paths, certificate trust, expected publisher and timestamps. Reject missing/unexpected files. Seal the manifest and ZIP only from these signed bytes.
-4. Compile the outer SFX with those exact resources. Upload the resulting outer EXE as a second workflow artifact and request signing under a separate **outer** configuration.
-5. Verify the final outer signature and its embedded resource hashes without loading executable code. Run clean-install, upgrade, key-vault, notification and GUI acceptance under Smart App Control enforcement on an allowed test system. Only then publish the final SHA-256 and signed release.
+1. `Prepare-SignPathPayload.ps1` compiles the source without starting the app and prepares the exact native-only payload. Upload its own `DomTrack-UA.exe` as an immutable GitHub workflow artifact for the first SignPath configuration.
+2. SignPath signs only that project executable. `Seal-SignPathOuter.ps1` checks the returned file set, expected signer, Windows trust, timestamp and unchanged executable content outside allowed Authenticode fields. It inserts the signed launcher into the payload and seals the manifest/ZIP before compiling the outer package.
+3. Upload the outer executable as another immutable artifact. A separate SignPath configuration signs it.
+4. `Verify-SignPathRelease.ps1` checks the returned outer file, trusted expected signature and package resources as data, and creates a release candidate with final hashes. It does not start the app, install it or publish a GitHub Release.
+5. Perform the Windows integration acceptance checks on an allowed device before publishing the candidate. A successful service signature does not prove GUI startup, update, DPAPI or notification behavior.
 
-The current `Build-OneFile.ps1 -BuildMode Release` uses a locally available owner-selected signing certificate. It is **not a SignPath client**, and a service certificate's thumbprint cannot substitute for a private key on this computer. Before enabling release automation, its compilation/sealing stages must be exposed as the two service-signing phases above. The source-CI workflow intentionally does not pretend that this refactor already exists. If a development SFX is tested in an allowed runner, pass the explicit repository-local `-BuildDirectory` supported by the reviewed builder; do not use the old `../../../work` assumption.
+SignPath signs only the project's own executables. Node.js and Microsoft files keep their upstream signatures. The remote artifact configurations describe the ZIP wrapper produced by GitHub artifact upload and the exact expected executable and metadata; the custom self-extracting resources are not assumed to be automatically understood or recursively signed by the service.
 
-## Required owner/service configuration
+The old `app/launcher/Build-OneFile.ps1` is a separate local-certificate builder. A service certificate's thumbprint is not a locally available private key and must not be substituted into that builder as though it performed cloud signing.
 
-All of these remain unset until real project approval:
+## Configuration after service approval
 
-- SignPath organization ID and project slug.
-- Separate reviewed payload/outer artifact-configuration slugs and signing-policy slugs.
-- SignPath GitHub App access to the intended repository and the GitHub.com trusted-build-system link.
-- An approved submitter's `SIGNPATH_API_TOKEN`, stored only in a protected GitHub environment secret; never in this repository, chat or build arguments printed to logs.
-- Named code reviewers and release approvers, project metadata restrictions and the expected signing certificate identity.
-- Protected release rules and explicit human signing approval. No fork PR or unreviewed branch may receive signing credentials.
+Do not populate configuration with guessed example values. Obtain the real organization ID, project slug, separate inner/outer artifact-configuration and signing-policy slugs, and the expected signer certificate thumbprint from the approved service project. The thumbprint identifies the expected signer; successful Windows trust and timestamp checks are also required.
 
-SignPath's documented action is `signpath/github-action-submit-signing-request`; the current v3 commit is recorded in the lock file. Its required input names are `api-token`, `organization-id`, `project-slug`, `signing-policy-slug` and `github-artifact-id`; `artifact-configuration-slug` chooses the reviewed format. The `github-artifact-id` must come from the preceding `actions/upload-artifact` output, not a hand-built local URL. The connector needs read permissions for contents and actions. Use `output-artifact-directory` to collect the signed result and `wait-for-completion` according to the approval process.
+Install the official SignPath GitHub App with access limited to this repository and link the GitHub.com trusted build system to the approved SignPath project. Store its submitter API token only as `SIGNPATH_API_TOKEN` in the protected GitHub release environment. This token is unrelated to the user's RIA data-source key. The signing private key stays in the signing service; no PFX, private key or certificate password belongs in the repository.
 
-GitHub upload-artifact normally wraps the upload in ZIP; the SignPath configuration must describe that wrapper. A custom embedded SFX is not automatically a recognized nested container, so do not assume a single outer signing request signs its resources. The private key stays in SignPath's service/HSM; the repository never receives a PFX or private key.
+Configure the `signpath-release` GitHub environment's actual branch/deployment restrictions and required human approval, together with the SignPath approval policy and GitHub branch protections. Merely naming an environment in YAML does not create those protections. Multifactor authentication and the final human roles must be confirmed during onboarding. A workflow guard is not a substitute for a service policy or repository access control.
 
-## Primary sources
+The workflow is manual and restricted to its reviewed main-branch configuration. It has no automatic release publication step and no push/PR/tag trigger. Never expose signing credentials to fork PRs or use an arbitrary user-supplied workflow revision to sign a release.
 
-- [Official Node.js 24.22.1 release](https://nodejs.org/en/blog/release/v24.22.1/) and [checksums](https://nodejs.org/dist/v24.22.1/SHASUMS256.txt).
-- [Official WebView2 NuGet package](https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.4314.35) and [immutable catalog hash metadata](https://api.nuget.org/v3/catalog0/data/2026.10.23.06.50.10/microsoft.web.webview2.1.0.4314.35.json).
-- [SignPath GitHub connector](https://docs.signpath.io/trusted-build-systems/github), [artifact formats and signature verification](https://docs.signpath.io/artifact-configuration/reference), [nested signing](https://docs.signpath.io/artifact-configuration/syntax).
-- [SignPath Foundation conditions](https://signpath.org/terms.html). Approval depends on licensing, maintenance, verifiable reputation and build provenance; a newly public repository is not guaranteed acceptance.
-- [GitHub action pinning guidance](https://docs.github.com/en/enterprise-cloud@latest/actions/reference/security/secure-use).
+## Provenance and acceptance limits
+
+GitHub-hosted `windows-2025` is an evolving runner image, not an immutable compiler environment. Build evidence records its available provenance; fixed input hashes do not establish bit-for-bit reproducibility across all runner updates or signature timestamps.
+
+Default source tests mock Windows integrations. They do not exercise real user keys, DPAPI, desktop notifications or the final installed/extracted application. A current passing source/build report must accompany any candidate, with its remaining integration checks explicitly recorded. Current preparation is not evidence of actual SignPath approval or a successful remote signed build.
+
+## Primary references
+
+- [Foundation terms](https://signpath.org/terms.html) and [application](https://signpath.org/apply.html).
+- [Official GitHub trusted-build integration](https://docs.signpath.io/trusted-build-systems/github), [artifact configuration syntax](https://docs.signpath.io/artifact-configuration/syntax) and [reference](https://docs.signpath.io/artifact-configuration/reference).
+- [Official Node.js release](https://nodejs.org/en/blog/release/v24.22.1/) and [checksums](https://nodejs.org/dist/v24.22.1/SHASUMS256.txt).
+- [Official WebView2 SDK package](https://www.nuget.org/packages/Microsoft.Web.WebView2/1.0.4314.35).

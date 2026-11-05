@@ -1,0 +1,132 @@
+# Manual candidate preparation. This workflow cannot publish a release.
+# Enable only after Foundation approval and protected-environment setup.
+name: Prepare signed candidate with SignPath (approval required)
+
+'on':
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: signpath-candidate
+  cancel-in-progress: false
+
+jobs:
+  signed-candidate:
+    if: github.repository == 'kvkv602-crypto/domtrack-ua' && github.ref == 'refs/heads/main' && github.event.repository.private == false
+    runs-on: windows-2025
+    timeout-minutes: 90
+    environment: signpath-release
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      DOMTRACK_TEST_REAL_DPAPI: '0'
+      DOMTRACK_DISABLE_DESKTOP: '1'
+      EXPECTED_SIGNER_THUMBPRINT: ${{ vars.SIGNPATH_SIGNER_THUMBPRINT }}
+    steps:
+      - name: Check out the selected main-branch commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Refuse incomplete service or publication configuration
+        env:
+          SIGNPATH_ENABLED: ${{ vars.SIGNPATH_ENABLED }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_POLICY_SLUG: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          SIGNPATH_INNER_CONFIGURATION: ${{ vars.SIGNPATH_INNER_CONFIGURATION }}
+          SIGNPATH_OUTER_CONFIGURATION: ${{ vars.SIGNPATH_OUTER_CONFIGURATION }}
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: |
+          Import-Module ./packaging/signpath/SignPathBuild.psm1
+          Assert-SignPathSettings -Enabled $env:SIGNPATH_ENABLED -OrganizationId $env:SIGNPATH_ORGANIZATION_ID -ProjectSlug $env:SIGNPATH_PROJECT_SLUG -PolicySlug $env:SIGNPATH_POLICY_SLUG -InnerConfiguration $env:SIGNPATH_INNER_CONFIGURATION -OuterConfiguration $env:SIGNPATH_OUTER_CONFIGURATION -SignerThumbprint $env:EXPECTED_SIGNER_THUMBPRINT -TokenPresent (-not [string]::IsNullOrWhiteSpace($env:SIGNPATH_API_TOKEN))
+          Assert-SignPathPublication -RepositoryRoot .
+      - name: Verify signing boundary and packaging contracts
+        run: ./ci/Test-SignPathBuild.ps1
+      - name: Restore pinned official dependencies
+        run: ./ci/Restore-Dependencies.ps1 -AppRoot ./app -DownloadDirectory ./.build/downloads
+      - name: Test source without native helper execution
+        run: |
+          & ./app/runtime/node.exe --test --test-isolation=none 'app/tests/*.test.cjs'
+          if ($LASTEXITCODE -ne 0) { throw 'Source tests failed.' }
+      - name: Compile and inventory the native-only payload
+        id: input
+        run: |
+          ./ci/Prepare-SignPathPayload.ps1 -AppRoot ./app -OutputDirectory ./.build/signpath-input
+          $evidence = Get-Content ./.build/signpath-input/input-evidence.json -Raw | ConvertFrom-Json
+          if ($evidence.appVersion -cnotmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw 'Invalid package version.' }
+          "version=$($evidence.appVersion).0" >> $env:GITHUB_OUTPUT
+      - name: Upload immutable owned-launcher input
+        id: inner
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: domtrack-inner-unsigned-${{ github.sha }}
+          path: .build/signpath-input/inner-signing/DomTrack-UA.exe
+          if-no-files-found: error
+          retention-days: 7
+      - name: Request approved inner signature and wait for its approval
+        id: inner-signature
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_INNER_CONFIGURATION }}
+          github-artifact-id: ${{ steps.inner.outputs.artifact-id }}
+          parameters: |
+            version: "${{ steps.input.outputs.version }}"
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1800
+          output-artifact-directory: .build/signed-inner
+      - name: Verify inner signature and seal its exact bytes into the outer EXE
+        run: ./ci/Seal-SignPathOuter.ps1 -InputDirectory ./.build/signpath-input -SignedLauncherDirectory ./.build/signed-inner -OutputDirectory ./.build/signpath-sealed -ExpectedSignerThumbprint $env:EXPECTED_SIGNER_THUMBPRINT
+      - name: Upload immutable outer signing input
+        id: outer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: domtrack-outer-unsigned-${{ github.sha }}
+          path: .build/signpath-sealed/outer-signing/DomTrack-UA.exe
+          if-no-files-found: error
+          retention-days: 7
+      - name: Request approved outer signature and wait for its approval
+        id: outer-signature
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          artifact-configuration-slug: ${{ vars.SIGNPATH_OUTER_CONFIGURATION }}
+          github-artifact-id: ${{ steps.outer.outputs.artifact-id }}
+          parameters: |
+            version: "${{ steps.input.outputs.version }}"
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 1800
+          output-artifact-directory: .build/signed-outer
+      - name: Verify both signatures and the final embedded resources as data
+        run: ./ci/Verify-SignPathRelease.ps1 -SealedDirectory ./.build/signpath-sealed -SignedOuterDirectory ./.build/signed-outer -OutputDirectory ./dist/signed-candidate -ExpectedSignerThumbprint $env:EXPECTED_SIGNER_THUMBPRINT
+      - name: Retain signed candidate for human runtime acceptance
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: domtrack-signed-candidate-${{ github.sha }}
+          path: |
+            dist/signed-candidate/*.exe
+            dist/signed-candidate/*.sha256
+            dist/signed-candidate/signing-evidence.json
+            dist/signed-candidate/ACCEPTANCE-REQUIRED.txt
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain build and signing evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: domtrack-signpath-evidence-${{ github.sha }}
+          path: |
+            .build/signpath-input/input-evidence.json
+            .build/signpath-sealed/sealed-evidence.json
+          if-no-files-found: warn
+          retention-days: 14

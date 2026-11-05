@@ -1,6 +1,6 @@
-# Privacy policy — draft
+# Privacy policy
 
-Privacy policy draft for the private DomTrack UA development project. Maintainer/contact: `https://github.com/kvkv602-crypto`. Repository: `https://github.com/kvkv602-crypto/domtrack-ua`. The owner must review this policy before any signed end-user release.
+Privacy policy for DomTrack UA's MIT-licensed source publication. Maintainer/contact: [kvkv602-crypto](https://github.com/kvkv602-crypto). Repository: [domtrack-ua](https://github.com/kvkv602-crypto/domtrack-ua). The owner has approved public source publication and the MIT license is active. The repository visibility change is pending completion, and no signed end-user release is available.
 
 ## Local information
 
@@ -12,7 +12,7 @@ The unpackaged native launcher defaults to `%LOCALAPPDATA%\DomTrackUA\data`. The
 
 The app has no application-owned advertising, analytics or telemetry reporting endpoint in the reviewed source. It binds its local API to loopback and requires a session token. It is not a VPN or anonymity service: remote services can observe the computer's public IP address and requested URLs.
 
-Launching the desktop app automatically refreshes the selected city once. Searching or loading more pages requests the connected public catalogs (currently Rieltor, DOM.RIA and OBYAVA for Zaporizhzhia). Configured source collection and individual price watches may issue later requests while the app runs. A user may also configure other public source URLs. Website access rules and quotas are respected; the app does not bypass paywalls or CAPTCHA.
+Launching the desktop app automatically refreshes the selected city once. Searching or loading more pages requests the connected public catalogs: `rieltor.ua`, and, for the currently supported Zaporizhzhia routes, `dom.ria.com` and `obyava.ua`. Configured source collection and individual price watches may issue later requests while the app runs. A user may also configure other public source URLs. Website access restrictions and quotas can stop or limit collection; the app does not bypass paywalls or CAPTCHA.
 
 Currency comparison and historical conversion request date-specific official rates from `bank.gov.ua`. Enabling the optional RIA integration sends the user-provided API key and selected search parameters to the official `developers.ria.com` API. It does not send the key to other listing sites. A map, when used for a listing with known coordinates, loads OpenStreetMap content and exposes that map request to its service. Opening an original listing, contact link or external link uses the chosen third-party service/default application.
 
@@ -22,8 +22,8 @@ The app does not itself upload the user's database, notes, favorites or key to a
 
 WebView2 Runtime and the operating system have their own network, update and privacy behavior. Review Microsoft's privacy statement at https://privacy.microsoft.com/privacystatement and OpenStreetMap's policy at https://osmfoundation.org/wiki/Privacy_Policy. Review the relevant listing provider's privacy policy when using that provider; the app is not affiliated with those providers.
 
-The app does not install a Windows service or enable Windows autostart. Closing/stopping it ends scheduled checks. Users can disable configured collection, turn off watches and avoid map/external-link actions. The app includes a Russian privacy summary accessible from its footer. A public policy URL and review of Store disclosure fields are still required before Store submission; installer review and certification have not happened.
+The app does not install a Windows service or enable Windows autostart. Closing its window or choosing **«Остановить и выйти»** stops the server owned by that launcher and its scheduled checks. A separately started development server must be stopped separately. Users can disable configured collection, turn off watches and avoid map/external-link actions. The app includes a Russian privacy summary accessible from its footer. Its proposed signed release uses the native Windows bridge for DPAPI and notifications rather than distributing the legacy PowerShell helpers. Neither SignPath approval nor end-user release acceptance has occurred.
 
 ## Retention and removal
 
-Local information remains until the user changes or removes it. A full backup must keep the SQLite database and any related WAL/SHM files together after stopping the app. Removing the `data` folder deletes local history/settings and the encrypted key; removing `webview` clears the embedded profile. Uninstalling files does not cancel accounts or erase data held independently by third-party websites.
+Local information remains until the user changes or removes it. A full backup must keep the SQLite database and any related WAL/SHM files together after stopping the app. The single-file edition can be removed by exiting it and removing the downloaded executable, any user-created shortcuts and `%LOCALAPPDATA%\DomTrackUA\app`. Its separate `data` and `webview` folders are not removed by that operation. Removing `data` deletes local history/settings and the encrypted key; removing `webview` clears the embedded profile. Removing app files does not cancel accounts or erase data held independently by third-party websites.

@@ -10,7 +10,7 @@
     "start": "node server.cjs",
     "test": "node --test --test-isolation=none tests/*.test.cjs"
   },
-  "license": "UNLICENSED",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/kvkv602-crypto/domtrack-ua.git"
