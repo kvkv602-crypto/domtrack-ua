@@ -765,8 +765,11 @@ public class MainActivity extends Activity {
                     r.optString("address")
                 )
                 .putExtra(android.provider.CalendarContract.Events.DESCRIPTION, r.optString("url"));
-            if (i.resolveActivity(getPackageManager()) != null) startActivity(i);
-            else toast("На телефоне не найден календарь");
+            try {
+                startActivity(i);
+            } catch (ActivityNotFoundException e) {
+                toast("На телефоне не найден календарь");
+            }
         });
         addButton(content, "Маршрут", () -> {
             if (r.has("latitude") && r.has("longitude")) open(
