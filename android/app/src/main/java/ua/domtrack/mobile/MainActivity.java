@@ -14,76 +14,1613 @@ import android.text.InputType;
 import android.view.*;
 import android.webkit.*;
 import android.widget.*;
-import org.json.*;
 import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import org.json.*;
 
 public class MainActivity extends Activity {
-    private Database db;private LinearLayout root,body,nav;private TextView status;private JSONObject filters;private String tab="Поиск";private int visibleCount=30;
-    private final ExecutorService io=Executors.newSingleThreadExecutor();private final AtomicBoolean stopped=new AtomicBoolean();private final Set<String> compare=new LinkedHashSet<>();private final Handler handler=new Handler(Looper.getMainLooper());private byte[] exportBytes;private String exportPassword;private boolean resumed;
-    private final int INK=Color.rgb(27,43,59),GREEN=Color.rgb(19,125,102),MUTED=Color.rgb(100,116,135),BG=Color.rgb(245,247,250);
-    public void onCreate(Bundle state){super.onCreate(state);db=((DomTrackApp)getApplication()).db();filters=db.state("currentFilters",Json.object("city","Запоріжжя","kind","both","currency","EUR"));build();handleIntent(getIntent());}
-    protected void onNewIntent(Intent intent){super.onNewIntent(intent);setIntent(intent);handleIntent(intent);}
-    protected void onResume(){super.onResume();resumed=true;Alerts.deliver(this,db);render();}
-    protected void onPause(){super.onPause();resumed=false;}
-    protected void onStop(){super.onStop();stopped.set(true);}
-    protected void onDestroy(){stopped.set(true);io.shutdownNow();super.onDestroy();}
-    private void handleIntent(Intent intent){if(Intent.ACTION_SEND.equals(intent.getAction())){String text=intent.getStringExtra(Intent.EXTRA_TEXT);if(text!=null){java.util.regex.Matcher m=java.util.regex.Pattern.compile("https://[^\\s<>]+",java.util.regex.Pattern.CASE_INSENSITIVE).matcher(text);if(m.find())addUrl(m.group());}}String id=intent.getStringExtra("listingId");if(id!=null)handler.post(()->detail(id));}
-    private int dp(float n){return (int)(getResources().getDisplayMetrics().density*n+.5f);}
-    private LinearLayout column(){LinearLayout v=new LinearLayout(this);v.setOrientation(LinearLayout.VERTICAL);return v;}
-    private LinearLayout row(){LinearLayout v=new LinearLayout(this);v.setOrientation(LinearLayout.HORIZONTAL);v.setGravity(Gravity.CENTER_VERTICAL);return v;}
-    private TextView text(String value,int size,int color){TextView v=new TextView(this);v.setText(value);v.setTextSize(size);v.setTextColor(color);v.setPadding(0,dp(5),0,dp(5));v.setTextIsSelectable(true);return v;}
-    private TextView heading(String value){TextView v=text(value,23,INK);v.setTypeface(null,Typeface.BOLD);return v;}
-    private Button button(String label,Runnable action){Button b=new Button(this);b.setText(label);b.setAllCaps(false);b.setTextColor(GREEN);b.setMinHeight(dp(44));b.setOnClickListener(v->action.run());return b;}
-    private void addButton(LinearLayout parent,String label,Runnable action){parent.addView(button(label,action),new LinearLayout.LayoutParams(-1,-2));}
-    private LinearLayout card(){LinearLayout box=column();box.setPadding(dp(14),dp(10),dp(14),dp(12));GradientDrawable bg=new GradientDrawable();bg.setColor(Color.WHITE);bg.setCornerRadius(dp(16));bg.setStroke(dp(1),Color.rgb(226,232,239));box.setBackground(bg);LinearLayout.LayoutParams lp=new LinearLayout.LayoutParams(-1,-2);lp.setMargins(0,dp(7),0,dp(7));box.setLayoutParams(lp);return box;}
-    private void build(){root=column();root.setBackgroundColor(BG);root.setPadding(dp(16),dp(8),dp(16),0);root.setOnApplyWindowInsetsListener((v,insets)->{android.graphics.Insets bars=insets.getInsets(WindowInsets.Type.systemBars()|WindowInsets.Type.displayCutout());v.setPadding(dp(16)+bars.left,dp(8)+bars.top,dp(16)+bars.right,bars.bottom);return insets;});root.addView(heading("DomTrack UA"));status=text("Самостоятельный поиск · данные на телефоне",12,MUTED);root.addView(status);ScrollView scroll=new ScrollView(this);scroll.setFillViewport(true);body=column();body.setPadding(0,dp(4),0,dp(12));scroll.addView(body);root.addView(scroll,new LinearLayout.LayoutParams(-1,0,1));nav=row();for(String name:List.of("Поиск","Избранное","События","Ещё")){Button b=button(name,()->{tab=name;visibleCount=30;render();});b.setTextSize(11);b.setPadding(0,0,0,0);nav.addView(b,new LinearLayout.LayoutParams(0,dp(56),1));}root.addView(nav);setContentView(root);render();}
-    private void render(){if(body==null||isFinishing())return;body.removeAllViews();switch(tab){case "Избранное":showListings(true);break;case "События":showEvents();break;case "Ещё":showMore();break;default:showListings(false);}}
-    private String fmt(double n){return String.format(Locale.forLanguageTag("ru"),"%,.0f",n);}
-    private JSONObject quote(){return db.state("fx:"+Model.date(),new JSONObject());}
-    private String price(JSONObject r){String original=fmt(r.optDouble("price"))+" "+r.optString("currency");String currency=filters.optString("currency","EUR");double converted=Model.convert(r.optDouble("price"),r.optString("currency"),currency,quote());return currency.equals(r.optString("currency"))?original:Double.isFinite(converted)?fmt(converted)+" "+currency+" · "+original:original+" · курс НБУ недоступен";}
-    private void showListings(boolean favorites){LinearLayout actions=row();actions.addView(button("Фильтры",this::filterDialog),new LinearLayout.LayoutParams(0,-2,1));actions.addView(button("Карта",this::map),new LinearLayout.LayoutParams(0,-2,1));body.addView(actions);body.addView(text(filters.optString("city")+" · "+(filters.optString("kind").equals("house")?"дома":filters.optString("kind").equals("apartment")?"квартиры":"квартиры и дома")+(filters.has("priceMax")?" · до "+fmt(filters.optDouble("priceMax"))+" "+filters.optString("currency"):""),14,MUTED));
-        if(!favorites){LinearLayout scan=row();scan.addView(button(Scanner.BUSY.get()?"Остановить":"Проверить",()->{if(Scanner.BUSY.get())stopped.set(true);else startScan(false);}),new LinearLayout.LayoutParams(0,-2,1));scan.addView(button("Полный обход",()->startScan(true)),new LinearLayout.LayoutParams(0,-2,1));body.addView(scan);addButton(body,"Сохранить поиск и включить наблюдение",this::saveSearch);}
-        List<JSONObject> rows=new ArrayList<>();JSONObject f=Json.copy(filters);if(favorites)Json.put(f,"favorite",true);for(JSONObject r:db.listings())if(!r.optBoolean("hidden")&&Model.matches(r,f,quote()))rows.add(r);String sort=db.state("ui",new JSONObject()).optString("sort","price");if(sort.equals("price"))rows.sort(Comparator.comparingDouble(r->{double p=Model.convert(r.optDouble("price"),r.optString("currency"),filters.optString("currency","EUR"),quote());return Double.isFinite(p)?p:Double.MAX_VALUE;}));else rows.sort((a,b)->b.optString("firstSeen").compareTo(a.optString("firstSeen")));
-        body.addView(text("Найдено в локальной базе: "+rows.size(),14,INK));addButton(body,"Сравнить отмеченные объекты",this::comparison);
-        if(rows.isEmpty()){LinearLayout empty=card();empty.addView(heading("Сохрани поиск"));empty.addView(text("Проверь фильтры и запусти загрузку. История цен начнёт накапливаться с первого наблюдения. Избранное доступно без интернета.",15,MUTED));body.addView(empty);}
-        for(JSONObject r:rows.subList(0,Math.min(visibleCount,rows.size()))){LinearLayout box=card();TextView p=text(price(r),21,GREEN);p.setTypeface(null,Typeface.BOLD);box.addView(p);box.addView(text(r.optString("title"),17,INK));box.addView(text(spec(r),13,MUTED));box.addView(text(r.optString("source")+" · проверено "+shortDate(r.optString("lastSeen")),11,MUTED));LinearLayout line=row();line.addView(button("Открыть",()->detail(r.optString("id"))),new LinearLayout.LayoutParams(0,-2,1));line.addView(button(r.optBoolean("favorite")?"★":"☆",()->{db.local(r.optString("id"),"favorite",!r.optBoolean("favorite"));render();}),new LinearLayout.LayoutParams(dp(56),-2));CheckBox cb=new CheckBox(this);cb.setContentDescription("Добавить к сравнению");cb.setChecked(compare.contains(r.optString("id")));cb.setOnCheckedChangeListener((v,checked)->{if(checked){if(compare.size()>=5){cb.setChecked(false);toast("Для сравнения выбери до 5 объектов");return;}compare.add(r.optString("id"));}else compare.remove(r.optString("id"));});line.addView(cb);box.addView(line);body.addView(box);}
-        if(rows.size()>visibleCount)addButton(body,"Показать ещё",()->{visibleCount+=30;render();});JSONObject last=db.state("lastCheck",new JSONObject());body.addView(text(last.has("at")?"Последняя проверка: "+shortDate(last.optString("at"))+" · страниц: "+last.optInt("pages")+" · записей: "+last.optInt("imported"):"Фоновые проверки запланированы с интервалом 15 минут. Android может отложить запуск.",12,MUTED));}
-    private String spec(JSONObject r){List<String> s=new ArrayList<>();s.add(r.optString("kind").equals("house")?"Дом":"Квартира");if(r.has("rooms"))s.add(r.optInt("rooms")+" комн.");if(r.has("area"))s.add(r.optDouble("area")+" м²");if(r.has("floor"))s.add("этаж "+r.optInt("floor")+(r.has("floorsTotal")?"/"+r.optInt("floorsTotal"):""));if(!r.optString("district").isBlank())s.add(r.optString("district"));return String.join(" · ",s);}
-    private String shortDate(String value){try{return java.time.Instant.parse(value).atZone(java.time.ZoneId.systemDefault()).format(java.time.format.DateTimeFormatter.ofPattern("dd.MM HH:mm"));}catch(Exception e){return value;}}
-    private EditText input(LinearLayout parent,String label,String value,boolean numeric){parent.addView(text(label,12,MUTED));EditText field=new EditText(this);field.setText(value);field.setSingleLine(true);field.setTextSize(16);field.setInputType(numeric?InputType.TYPE_CLASS_NUMBER|InputType.TYPE_NUMBER_FLAG_DECIMAL:InputType.TYPE_CLASS_TEXT);parent.addView(field,new LinearLayout.LayoutParams(-1,dp(48)));return field;}
-    private Spinner select(LinearLayout parent,String label,String[] items,int selected){parent.addView(text(label,12,MUTED));Spinner spinner=new Spinner(this);spinner.setAdapter(new ArrayAdapter<>(this,android.R.layout.simple_spinner_dropdown_item,items));spinner.setSelection(Math.max(0,selected));parent.addView(spinner,new LinearLayout.LayoutParams(-1,dp(48)));return spinner;}
-    private AlertDialog dialog(String title,LinearLayout content){content.setPadding(dp(18),dp(8),dp(18),dp(18));ScrollView scroll=new ScrollView(this);scroll.addView(content);return new AlertDialog.Builder(this).setTitle(title).setView(scroll).setNegativeButton("Закрыть",null).create();}
-    private void filterDialog(){LinearLayout form=column();String[] cities=Arrays.stream(Sources.CITIES).map(c->c[0]).toArray(String[]::new);Spinner city=select(form,"Город",cities,Arrays.asList(cities).indexOf(filters.optString("city")));Spinner kind=select(form,"Тип жилья",new String[]{"Квартиры и дома","Квартиры","Дома"},List.of("both","apartment","house").indexOf(filters.optString("kind","both")));EditText district=input(form,"Район или адрес содержит",filters.optString("district"),false);Spinner currency=select(form,"Валюта бюджета",new String[]{"EUR","USD","UAH"},List.of("EUR","USD","UAH").indexOf(filters.optString("currency","EUR")));Map<String,EditText> fields=new LinkedHashMap<>();String[][] definitions={{"priceMin","Цена от"},{"priceMax","Цена до"},{"roomsMin","Комнат от"},{"roomsMax","Комнат до"},{"areaMin","Площадь от, м²"},{"areaMax","Площадь до, м²"},{"floorMin","Этаж от"},{"floorMax","Этаж до"},{"floorsTotalMin","Этажность здания от"},{"floorsTotalMax","Этажность здания до"}};for(String[] def:definitions)fields.put(def[0],input(form,def[1],filters.optString(def[0],""),true));Spinner seller=select(form,"Продавец",new String[]{"Любой / не указан","Хозяин","Застройщик","Риелтор"},List.of("any","owner","developer","agent").indexOf(filters.optString("sellerType","any")));
-        String[] previous={filters.optString("currency","EUR")};currency.setOnItemSelectedListener(new android.widget.AdapterView.OnItemSelectedListener(){public void onNothingSelected(AdapterView<?> p){}public void onItemSelected(AdapterView<?> p,View v,int pos,long id){String next=currency.getSelectedItem().toString();if(next.equals(previous[0]))return;for(String key:List.of("priceMin","priceMax")){EditText e=fields.get(key);if(!e.getText().toString().isBlank()){try{double n=Double.parseDouble(e.getText().toString().replace(',','.')),converted=Model.convert(n,previous[0],next,quote());if(!Double.isFinite(converted))throw new IllegalArgumentException();e.setText(String.format(Locale.ROOT,"%.2f",converted));}catch(Exception ex){currency.setSelection(List.of("EUR","USD","UAH").indexOf(previous[0]));toast("Для пересчёта бюджета сначала обнови курс НБУ");return;}}}previous[0]=next;}});
-        AlertDialog d=dialog("Фильтры поиска",form);d.setButton(AlertDialog.BUTTON_POSITIVE,"Применить",(x,w)->{});d.show();d.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{try{JSONObject f=Json.object("city",city.getSelectedItem().toString(),"kind",List.of("both","apartment","house").get(kind.getSelectedItemPosition()),"district",district.getText().toString().trim(),"currency",currency.getSelectedItem().toString(),"sellerType",List.of("any","owner","developer","agent").get(seller.getSelectedItemPosition()));for(Map.Entry<String,EditText> entry:fields.entrySet()){String s=entry.getValue().getText().toString().trim().replace(',','.');if(s.isEmpty())continue;double n=Double.parseDouble(s);if(!Double.isFinite(n)||n<0||n>1e12)throw new IllegalArgumentException("Проверь числовые поля");if((entry.getKey().startsWith("floor")||entry.getKey().startsWith("rooms"))&&(n!=Math.floor(n)||n>1000))throw new IllegalArgumentException("Комнаты и этажи: целые значения до 1000");Json.put(f,entry.getKey(),n);}for(String k:List.of("price","rooms","area","floor","floorsTotal"))if(f.has(k+"Min")&&f.has(k+"Max")&&f.optDouble(k+"Min")>f.optDouble(k+"Max"))throw new IllegalArgumentException("Значение «от» больше «до»");if(filters.has("polygon"))Json.put(f,"polygon",filters.opt("polygon"));filters=f;db.state("currentFilters",f);visibleCount=30;d.dismiss();render();}catch(Exception ex){toast(Scanner.safe(ex));}});}
-    private void saveSearch(){prompt("Название поиска",filters.optString("city")+" · "+filters.optString("currency"),false,name->{JSONObject saved=Json.object("name",name,"enabled",true,"filters",Json.copy(filters));db.saveSearch(saved);requestNotifications();toast("Поиск сохранён. Уведомления появятся после обнаружения новых изменений.");});}
-    private void startScan(boolean full){if(Scanner.BUSY.get()){toast("Проверка уже выполняется");return;}if(db.searches().isEmpty()){db.saveSearch(Json.object("name",filters.optString("city"),"enabled",true,"filters",Json.copy(filters)));requestNotifications();}stopped.set(false);status.setText("Подготовка самостоятельного поиска…");io.execute(()->{try{int n=new Scanner(this,db).scan(full,stopped::get,message->handler.post(()->status.setText(message)));handler.post(()->{status.setText("Проверка завершена · обработано записей: "+n);render();});}catch(Exception e){handler.post(()->{status.setText("Проверка прервана: "+Scanner.safe(e));render();});}});}
-    private void requestNotifications(){if(Build.VERSION.SDK_INT>=33&&checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED)requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS},10);}
-    private void showEvents(){body.addView(heading("Изменения"));addButton(body,"Разрешить уведомления и звук",()->{requestNotifications();startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,getPackageName()));});List<JSONObject> events=db.events(false);if(events.isEmpty())body.addView(text("Здесь появятся новые объявления и обнаруженные изменения. Первичная загрузка формирует исходную базу и не создаёт поток оповещений.",15,MUTED));for(JSONObject e:events){LinearLayout box=card();box.addView(text(e.optString("title"),17,INK));box.addView(text(e.optString("message"),14,MUTED));box.addView(text(shortDate(e.optString("createdAt")),12,MUTED));addButton(box,"Открыть объект",()->detail(e.optString("listingId")));body.addView(box);}}
-    private void detail(String id){JSONObject r=db.get(id);if(r==null)return;LinearLayout content=column();content.addView(heading(price(r)));content.addView(text(r.optString("title"),19,INK));content.addView(text(spec(r)+"\n"+r.optString("address"),15,MUTED));content.addView(text("Источник: "+r.optString("source")+"\nВпервые замечено: "+shortDate(r.optString("firstSeen"))+"\nПоследняя проверка: "+shortDate(r.optString("lastSeen")),12,MUTED));addButton(content,"Открыть исходное объявление",()->open(r.optString("url")));if(!r.optString("contactPhone").isBlank())addButton(content,"Позвонить: "+r.optString("contactPhone"),()->startActivity(new Intent(Intent.ACTION_DIAL,Uri.parse("tel:"+r.optString("contactPhone")))));else content.addView(text("Телефон не передан источником — проверь контакты в исходном объявлении.",13,MUTED));
-        addButton(content,r.optBoolean("favorite")?"Убрать из избранного":"Добавить в избранное",()->{db.local(id,"favorite",!r.optBoolean("favorite"));toast("Избранное обновлено");render();});JSONObject watch=r.optJSONObject("watch");Switch enabled=new Switch(this);enabled.setText("Следить за изменениями объекта");enabled.setChecked(watch!=null&&watch.optBoolean("enabled",true));enabled.setOnCheckedChangeListener((v,on)->{JSONObject w=watch==null?new JSONObject():Json.copy(watch);Json.put(w,"enabled",on);db.local(id,"watch",w);if(on)requestNotifications();});content.addView(enabled);addButton(content,"Задать порог цены",()->threshold(id,r));EditText note=input(content,"Мои заметки",r.optString("note"),false);note.setSingleLine(false);note.setMinLines(3);addButton(content,"Сохранить заметку",()->{db.local(id,"note",note.getText().toString());toast("Заметка сохранена");});addButton(content,"Запланировать просмотр",()->{Intent i=new Intent(Intent.ACTION_INSERT,android.provider.CalendarContract.Events.CONTENT_URI).putExtra(android.provider.CalendarContract.Events.TITLE,"Просмотр: "+r.optString("title")).putExtra(android.provider.CalendarContract.Events.EVENT_LOCATION,r.optString("address")).putExtra(android.provider.CalendarContract.Events.DESCRIPTION,r.optString("url"));if(i.resolveActivity(getPackageManager())!=null)startActivity(i);else toast("На телефоне не найден календарь");});addButton(content,"Маршрут",()->{if(r.has("latitude")&&r.has("longitude"))open("https://www.google.com/maps/dir/?api=1&destination="+r.optDouble("latitude")+","+r.optDouble("longitude"));else open("https://www.google.com/maps/search/?api=1&query="+Uri.encode(r.optString("city")+" "+r.optString("address")));});
-        content.addView(heading("История наблюдений"));List<JSONObject> history=db.history(id);content.addView(new PriceChart(this,history),new LinearLayout.LayoutParams(-1,dp(180)));for(JSONObject h:history.subList(0,Math.min(30,history.size())))content.addView(text(shortDate(h.optString("observedAt"))+" · "+fmt(h.optDouble("price"))+" "+h.optString("currency"),13,MUTED));content.addView(text("График показывает наблюдения приложения. Изменение курса НБУ не считается изменением цены продавцом.",12,MUTED));addButton(content,"Скрыть этот объект",()->{db.local(id,"hidden",true);render();toast("Объект скрыт");});dialog("Объект",content).show();}
-    private void threshold(String id,JSONObject r){LinearLayout form=column();JSONObject current=r.optJSONObject("watch");EditText target=input(form,"Оповестить, когда цена будет не выше",current==null?"":current.optString("target"),true);Spinner currency=select(form,"Валюта порога",new String[]{"EUR","USD","UAH"},0);AlertDialog d=dialog("Порог цены",form);d.setButton(-1,"Сохранить",(a,b)->{});d.show();d.getButton(-1).setOnClickListener(v->{try{double n=Double.parseDouble(target.getText().toString().replace(',','.'));if(n<=0||!Double.isFinite(n))throw new IllegalArgumentException("Укажи положительный порог");db.local(id,"watch",Json.object("enabled",true,"target",n,"currency",currency.getSelectedItem().toString()));requestNotifications();d.dismiss();toast("Порог сохранён");}catch(Exception e){toast("Проверь цену порога");}});}
-    private void comparison(){LinearLayout content=column();if(compare.size()<2){toast("Отметь от 2 до 5 объектов галочками");return;}for(String id:compare){JSONObject r=db.get(id);if(r==null)continue;LinearLayout box=card();box.addView(text(r.optString("title"),17,INK));box.addView(text(price(r),19,GREEN));box.addView(text(spec(r),14,MUTED));if(r.optDouble("area",0)>0)box.addView(text("За м²: "+fmt(r.optDouble("price")/r.optDouble("area"))+" "+r.optString("currency"),14,INK));box.addView(text(r.optString("note"),13,MUTED));content.addView(box);}addButton(content,"Очистить сравнение",()->{compare.clear();render();});dialog("Сравнение объектов",content).show();}
-    private void showMore(){body.addView(heading("Поиски и настройки"));for(JSONObject s:db.searches()){LinearLayout box=card();box.addView(text(s.optString("name"),17,INK));Switch active=new Switch(this);active.setText("Проверять и уведомлять");active.setChecked(s.optBoolean("enabled",true));active.setOnCheckedChangeListener((v,on)->{Json.put(s,"enabled",on);db.saveSearch(s);});box.addView(active);addButton(box,"Открыть поиск",()->{filters=Json.copy(s.optJSONObject("filters"));db.state("currentFilters",filters);tab="Поиск";render();});addButton(box,"Удалить поиск",()->{db.deleteSearch(s.optString("id"));render();});body.addView(box);}addButton(body,"Добавить ссылку на объявление",()->addUrl(""));addButton(body,"Добавить объект вручную",this::manual);addButton(body,"Источники и ход обхода",this::sourceStatus);addButton(body,"Фон, уведомления и экономия заряда",this::settings);addButton(body,"API-ключ DIM.RIA",this::keyDialog);addButton(body,"Обновить официальный курс НБУ",()->async(()->{Fx.get(db,new Network(),Model.date());return "Курс НБУ обновлён";}));addButton(body,"Зашифрованная резервная копия",()->prompt("Пароль копии: от 10 символов","",true,password->async(()->{exportBytes=Backup.encrypt(db.exportData(),password.toCharArray());handler.post(()->createDocument("DomTrack-backup-"+Model.date()+".json"));return "Выбери место сохранения";})));addButton(body,"Импорт / восстановление с ПК",()->{Intent i=new Intent(Intent.ACTION_OPEN_DOCUMENT).setType("application/json").addCategory(Intent.CATEGORY_OPENABLE);startActivityForResult(i,22);});addButton(body,"Экспорт объявлений для ПК",()->async(()->{JSONObject exported=db.exportData();Json.put(exported,"format","domtrack-export");exportBytes=exported.toString(2).getBytes(StandardCharsets.UTF_8);handler.post(()->createDocument("DomTrack-for-PC-"+Model.date()+".json"));return "Экспорт содержит личные объявления и заметки";}));body.addView(text("Телефон выполняет поиск самостоятельно. Обмен файлами с ПК — дополнительная возможность. API-ключ в резервную копию не включается.",13,MUTED));body.addView(text("DomTrack UA Android 0.1.0 · локальная версия\nКарты: © OpenStreetMap contributors",12,MUTED));}
-    private void settings(){LinearLayout form=column();JSONObject settings=db.state("settings",new JSONObject());toggle(form,"Автоматические проверки каждые 15 минут",settings,"background",true);toggle(form,"Только Wi-Fi / безлимитная сеть",settings,"wifiOnly",false);toggle(form,"Тихие часы: 23:00–08:00",settings,"quiet",true);for(int i=0;i<Alerts.TYPES.length;i++)toggle(form,Alerts.TITLES[i],settings,"alert_"+Alerts.TYPES[i],true);addButton(form,"Настроить звук и вибрацию по типам событий",()->startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE,getPackageName())));form.addView(text("Android может сдвигать время запуска. Короткая проверка обрабатывает 2 страницы по мобильной сети или 4 по Wi-Fi, затем сохраняет очередь. Полный обход продолжается при открытом приложении. Расход батареи зависит от числа поисков и ответа сайтов.",13,MUTED));dialog("Автоматическая работа",form).show();}
-    private void toggle(LinearLayout parent,String label,JSONObject settings,String key,boolean fallback){Switch s=new Switch(this);s.setText(label);s.setTextSize(15);s.setPadding(0,dp(12),0,dp(12));s.setChecked(settings.optBoolean(key,fallback));s.setOnCheckedChangeListener((v,on)->{Json.put(settings,key,on);db.state("settings",settings);((DomTrackApp)getApplication()).schedule();});parent.addView(s);}
-    private void keyDialog(){LinearLayout form=column();Secrets secrets=new Secrets(this);form.addView(text(secrets.configured()?"API-ключ сохранён на этом телефоне. Введи новый, чтобы заменить его.":"Ключ с компьютера автоматически не переносится. Введи собственный ключ из кабинета RIA.",14,MUTED));EditText field=input(form,"API-ключ","",false);field.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);addButton(form,"Сохранить ключ",()->async(()->{secrets.set(field.getText().toString().trim());handler.post(()->field.setText(""));return "Ключ сохранён в зашифрованном виде";}));addButton(form,"Удалить ключ",()->async(()->{secrets.set("");return "Ключ удалён";}));form.addView(text("Официальный API использует отдельные квоты. Открытые каталоги работают независимо от ключа.",13,MUTED));dialog("DIM.RIA",form).show();}
-    private void sourceStatus(){LinearLayout content=column();for(Sources.Section section:Sources.sections(filters.optString("city"),filters.optString("kind","both"))){JSONObject s=db.state("section:"+section.key(),new JSONObject());LinearLayout box=card();box.addView(text(section.source+" · "+(section.kind.equals("house")?"дома":"квартиры"),17,INK));box.addView(text("Проверено: "+shortDate(s.optString("checkedAt","ещё не проверено"))+"\nСледующая страница: "+s.optInt("nextPage",1)+"\n"+(s.optBoolean("complete")?"Обход раздела завершён":"Полный обход ещё не завершён")+(s.optString("error").isBlank()?"":"\n"+s.optString("error")),13,MUTED));content.addView(box);}content.addView(text("Подключены проверенные маршруты: Rieltor для городов списка; DOM.RIA, OBYAVA и Domik — для Запорожья. Отдельные ссылки можно импортировать при наличии однозначных данных продажи. Это не весь интернет.",13,MUTED));dialog("Охват источников",content).show();}
-    private void addUrl(String initial){prompt("Ссылка на объявление",initial,false,url->async(()->"Загружено объектов: "+new Scanner(this,db).importUrl(url)));}
-    private void manual(){LinearLayout form=column();EditText url=input(form,"HTTPS-ссылка","",false),title=input(form,"Заголовок","",false),city=input(form,"Город",filters.optString("city"),false),amount=input(form,"Полная цена объекта","",true);Spinner currency=select(form,"Валюта",new String[]{"EUR","USD","UAH"},0),kind=select(form,"Тип",new String[]{"Квартира","Дом"},0);EditText phone=input(form,"Открытый контактный телефон","",false);AlertDialog d=dialog("Добавить наблюдение",form);d.setButton(-1,"Сохранить",(a,b)->{});d.show();d.getButton(-1).setOnClickListener(v->{try{JSONObject r=Json.object("url",url.getText().toString(),"title",title.getText().toString(),"city",city.getText().toString(),"price",Double.parseDouble(amount.getText().toString().replace(',','.')),"currency",currency.getSelectedItem().toString(),"kind",kind.getSelectedItemPosition()==0?"apartment":"house","deal","sale","source","manual","observedAt",Model.now(),"contactPhone",phone.getText().toString());Model.validate(r);db.ingest(List.of(r),false);d.dismiss();render();}catch(Exception e){toast(Scanner.safe(e));}});}
-    private void map(){try{LinearLayout content=column();content.addView(text("Точки показывают координаты источников; точность может быть неизвестна. Включи рисование и нажимай на карту, чтобы задать границу.",13,MUTED));WebView web=new WebView(this);web.getSettings().setJavaScriptEnabled(true);web.getSettings().setAllowFileAccess(false);web.getSettings().setAllowContentAccess(false);web.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);web.getSettings().setUserAgentString(Network.AGENT);web.setWebViewClient(new WebViewClient(){public boolean shouldOverrideUrlLoading(WebView v,WebResourceRequest r){return true;}});String html=asset("map.html").replace("/*LEAFLET_CSS*/",asset("leaflet.css")).replace("/*LEAFLET_JS*/",asset("leaflet.js"));JSONArray points=new JSONArray();for(JSONObject r:db.listings())if(Model.matches(r,filters,quote())&&r.has("latitude")&&r.has("longitude"))points.put(Json.object("lat",r.optDouble("latitude"),"lon",r.optDouble("longitude"),"title",r.optString("title"),"price",price(r)));html=html.replace("/*POINT_DATA*/",points.toString().replace("<","\\u003c")).replace("/*ZONE_DATA*/",filters.optJSONArray("polygon")==null?"[]":filters.optJSONArray("polygon").toString());web.loadDataWithBaseURL("https://appassets.androidplatform.net/",html,"text/html","UTF-8",null);content.addView(web,new LinearLayout.LayoutParams(-1,dp(420)));addButton(content,"Рисовать / закончить границу",()->web.evaluateJavascript("window.drawing=!window.drawing",null));addButton(content,"Сохранить территорию фильтра",()->web.evaluateJavascript("JSON.stringify(window.zone)",value->{try{JSONArray zone=new JSONArray(new JSONTokener(value).nextValue().toString());if(zone.length()<3)throw new IllegalArgumentException();Json.put(filters,"polygon",zone);db.state("currentFilters",filters);toast("Территория сохранена. Объекты без координат не попадут в этот фильтр.");render();}catch(Exception e){toast("Нужно минимум 3 точки границы");}}));addButton(content,"Убрать территорию",()->{filters.remove("polygon");db.state("currentFilters",filters);web.evaluateJavascript("window.zone=[];window.redraw()",null);render();});AlertDialog d=dialog("Карта объектов",content);d.setOnDismissListener(x->web.destroy());d.show();}catch(Exception e){toast("Карта недоступна: "+Scanner.safe(e));}}
-    private String asset(String name)throws IOException{try(InputStream in=getAssets().open(name)){return new String(in.readAllBytes(),StandardCharsets.UTF_8);}}
-    private void prompt(String title,String initial,boolean secret,Consumer<String> action){LinearLayout form=column();EditText e=input(form,title,initial,false);if(secret)e.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_VARIATION_PASSWORD);AlertDialog d=dialog(title,form);d.setButton(-1,"Продолжить",(a,b)->{});d.show();d.getButton(-1).setOnClickListener(v->{String s=e.getText().toString().trim();if(s.isBlank()){e.setError("Заполни поле");return;}d.dismiss();action.accept(s);});}
-    private interface Task{String run()throws Exception;}
-    private void async(Task task){io.execute(()->{try{String result=task.run();handler.post(()->{toast(result);render();});}catch(Exception e){handler.post(()->toast(Scanner.safe(e)));}});}
-    private void toast(String text){Toast.makeText(this,text,Toast.LENGTH_LONG).show();}
-    private void open(String value){try{Uri uri=Uri.parse(value);if(!"https".equals(uri.getScheme()))throw new IllegalArgumentException();startActivity(new Intent(Intent.ACTION_VIEW,uri));}catch(Exception e){toast("Не удалось открыть ссылку");}}
-    private void createDocument(String name){startActivityForResult(new Intent(Intent.ACTION_CREATE_DOCUMENT).setType("application/json").putExtra(Intent.EXTRA_TITLE,name).addCategory(Intent.CATEGORY_OPENABLE),21);}
-    protected void onActivityResult(int request,int result,Intent data){super.onActivityResult(request,result,data);if(result!=RESULT_OK||data==null||data.getData()==null)return;Uri uri=data.getData();if(request==21){byte[] bytes=exportBytes;exportBytes=null;if(bytes==null)return;async(()->{try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IOException("Файл недоступен");out.write(bytes);}return "Файл сохранён";});}else if(request==22)async(()->{String text;try(InputStream in=getContentResolver().openInputStream(uri)){if(in==null)throw new IOException("Файл недоступен");ByteArrayOutputStream out=new ByteArrayOutputStream();byte[] b=new byte[8192];int n;while((n=in.read(b))!=-1){if(out.size()+n>16*1024*1024)throw new IOException("Файл больше 16 МБ");out.write(b,0,n);}text=out.toString(StandardCharsets.UTF_8);}JSONObject object=Json.obj(text);if(object.optString("format").equals("domtrack-encrypted")){String encrypted=text;handler.post(()->prompt("Пароль резервной копии","",true,password->async(()->"Восстановлено записей: "+Backup.restore(db,Backup.decrypt(encrypted,password.toCharArray())))));return "Введи пароль копии";}return "Импортировано записей: "+Backup.restore(db,object);});}
+
+    private Database db;
+    private LinearLayout root, body, nav;
+    private TextView status;
+    private JSONObject filters;
+    private String tab = "Поиск";
+    private int visibleCount = 30;
+    private final ExecutorService io = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean stopped = new AtomicBoolean();
+    private final Set<String> compare = new LinkedHashSet<>();
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private byte[] exportBytes;
+    private String exportPassword;
+    private boolean resumed;
+    private String pendingPhotoListing;
+    private final int INK = Color.rgb(27, 43, 59),
+        GREEN = Color.rgb(19, 125, 102),
+        MUTED = Color.rgb(100, 116, 135),
+        BG = Color.rgb(245, 247, 250);
+
+    public void onCreate(Bundle state) {
+        super.onCreate(state);
+        db = ((DomTrackApp) getApplication()).db();
+        filters = db.state(
+            "currentFilters",
+            Json.object("city", "Запоріжжя", "kind", "both", "currency", "EUR")
+        );
+        if (state != null) pendingPhotoListing = state.getString("pendingPhotoListing");
+        build();
+        handleIntent(getIntent());
+    }
+
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntent(intent);
+    }
+
+    protected void onResume() {
+        super.onResume();
+        resumed = true;
+        Alerts.deliver(this, db);
+        render();
+    }
+
+    protected void onPause() {
+        super.onPause();
+        resumed = false;
+    }
+
+    protected void onStop() {
+        super.onStop();
+        stopped.set(true);
+    }
+
+    protected void onDestroy() {
+        stopped.set(true);
+        io.shutdownNow();
+        super.onDestroy();
+    }
+
+    private void handleIntent(Intent intent) {
+        if (Intent.ACTION_SEND.equals(intent.getAction())) {
+            String text = intent.getStringExtra(Intent.EXTRA_TEXT);
+            if (text != null) {
+                java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                    "https://[^\\s<>]+",
+                    java.util.regex.Pattern.CASE_INSENSITIVE
+                ).matcher(text);
+                if (m.find()) addUrl(m.group());
+            }
+        }
+        String id = intent.getStringExtra("listingId");
+        if (id != null) handler.post(() -> detail(id));
+    }
+
+    private int dp(float n) {
+        return (int) (getResources().getDisplayMetrics().density * n + .5f);
+    }
+
+    private LinearLayout column() {
+        LinearLayout v = new LinearLayout(this);
+        v.setOrientation(LinearLayout.VERTICAL);
+        return v;
+    }
+
+    private LinearLayout row() {
+        LinearLayout v = new LinearLayout(this);
+        v.setOrientation(LinearLayout.HORIZONTAL);
+        v.setGravity(Gravity.CENTER_VERTICAL);
+        return v;
+    }
+
+    private TextView text(String value, int size, int color) {
+        TextView v = new TextView(this);
+        v.setText(value);
+        v.setTextSize(size);
+        v.setTextColor(color);
+        v.setPadding(0, dp(5), 0, dp(5));
+        v.setTextIsSelectable(true);
+        return v;
+    }
+
+    private TextView heading(String value) {
+        TextView v = text(value, 23, INK);
+        v.setTypeface(null, Typeface.BOLD);
+        return v;
+    }
+
+    private Button button(String label, Runnable action) {
+        Button b = new Button(this);
+        b.setText(label);
+        b.setAllCaps(false);
+        b.setTextColor(GREEN);
+        b.setMinHeight(dp(44));
+        b.setOnClickListener(v -> action.run());
+        return b;
+    }
+
+    private void addButton(LinearLayout parent, String label, Runnable action) {
+        parent.addView(button(label, action), new LinearLayout.LayoutParams(-1, -2));
+    }
+
+    private LinearLayout card() {
+        LinearLayout box = column();
+        box.setPadding(dp(14), dp(10), dp(14), dp(12));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.WHITE);
+        bg.setCornerRadius(dp(16));
+        bg.setStroke(dp(1), Color.rgb(226, 232, 239));
+        box.setBackground(bg);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.setMargins(0, dp(7), 0, dp(7));
+        box.setLayoutParams(lp);
+        return box;
+    }
+
+    private void build() {
+        root = column();
+        root.setBackgroundColor(BG);
+        root.setPadding(dp(16), dp(8), dp(16), 0);
+        root.setOnApplyWindowInsetsListener((v, insets) -> {
+            android.graphics.Insets bars = insets.getInsets(
+                WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()
+            );
+            v.setPadding(dp(16) + bars.left, dp(8) + bars.top, dp(16) + bars.right, bars.bottom);
+            return insets;
+        });
+        root.addView(heading("DomTrack UA"));
+        status = text("Самостоятельный поиск · данные на телефоне", 12, MUTED);
+        root.addView(status);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        body = column();
+        body.setPadding(0, dp(4), 0, dp(12));
+        scroll.addView(body);
+        root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
+        nav = row();
+        for (String name : List.of("Поиск", "Избранное", "События", "Ещё")) {
+            Button b = button(name, () -> {
+                tab = name;
+                visibleCount = 30;
+                render();
+            });
+            b.setTextSize(11);
+            b.setPadding(0, 0, 0, 0);
+            nav.addView(b, new LinearLayout.LayoutParams(0, dp(56), 1));
+        }
+        root.addView(nav);
+        setContentView(root);
+        render();
+    }
+
+    private void render() {
+        if (body == null || isFinishing()) return;
+        body.removeAllViews();
+        switch (tab) {
+            case "Избранное":
+                showListings(true);
+                break;
+            case "События":
+                showEvents();
+                break;
+            case "Ещё":
+                showMore();
+                break;
+            default:
+                showListings(false);
+        }
+    }
+
+    private String fmt(double n) {
+        return String.format(Locale.forLanguageTag("ru"), "%,.0f", n);
+    }
+
+    private JSONObject quote() {
+        return db.state("fx:" + Model.date(), new JSONObject());
+    }
+
+    private String price(JSONObject r) {
+        String original = fmt(r.optDouble("price")) + " " + r.optString("currency");
+        String currency = filters.optString("currency", "EUR");
+        double converted = Model.convert(
+            r.optDouble("price"),
+            r.optString("currency"),
+            currency,
+            quote()
+        );
+        return currency.equals(r.optString("currency"))
+            ? original
+            : Double.isFinite(converted)
+                ? fmt(converted) + " " + currency + " · " + original
+                : original + " · курс НБУ недоступен";
+    }
+
+    private void showListings(boolean favorites) {
+        LinearLayout actions = row();
+        actions.addView(
+            button("Фильтры", this::filterDialog),
+            new LinearLayout.LayoutParams(0, -2, 1)
+        );
+        actions.addView(button("Карта", this::map), new LinearLayout.LayoutParams(0, -2, 1));
+        body.addView(actions);
+        body.addView(
+            text(
+                filters.optString("city") +
+                    " · " +
+                    (filters.optString("kind").equals("house")
+                            ? "дома"
+                            : filters.optString("kind").equals("apartment")
+                                ? "квартиры"
+                                : "квартиры и дома") +
+                    (filters.has("priceMax")
+                            ? " · до " +
+                            fmt(filters.optDouble("priceMax")) +
+                            " " +
+                            filters.optString("currency")
+                            : ""),
+                14,
+                MUTED
+            )
+        );
+        if (!favorites) {
+            LinearLayout scan = row();
+            scan.addView(
+                button(Scanner.BUSY.get() ? "Остановить" : "Проверить", () -> {
+                    if (Scanner.BUSY.get()) stopped.set(true);
+                    else startScan(false);
+                }),
+                new LinearLayout.LayoutParams(0, -2, 1)
+            );
+            scan.addView(
+                button("Полный обход", () -> startScan(true)),
+                new LinearLayout.LayoutParams(0, -2, 1)
+            );
+            body.addView(scan);
+            addButton(body, "Сохранить поиск и включить наблюдение", this::saveSearch);
+        }
+        List<JSONObject> rows = new ArrayList<>();
+        JSONObject f = Json.copy(filters);
+        if (favorites) Json.put(f, "favorite", true);
+        for (JSONObject r : db.listings())
+            if (!r.optBoolean("hidden") && Model.matches(r, f, quote())) rows.add(r);
+        rows = Dedupe.collapsed(rows, quote(), filters.optString("currency", "EUR"));
+        String sort = db.state("ui", new JSONObject()).optString("sort", "price");
+        if (sort.equals("price")) rows.sort(
+            Comparator.comparingDouble(r -> {
+                double p = Model.convert(
+                    r.optDouble("price"),
+                    r.optString("currency"),
+                    filters.optString("currency", "EUR"),
+                    quote()
+                );
+                return Double.isFinite(p) ? p : Double.MAX_VALUE;
+            })
+        );
+        else rows.sort((a, b) -> b.optString("firstSeen").compareTo(a.optString("firstSeen")));
+        body.addView(text("Найдено в локальной базе: " + rows.size(), 14, INK));
+        addButton(body, "Сравнить отмеченные объекты", this::comparison);
+        if (rows.isEmpty()) {
+            LinearLayout empty = card();
+            empty.addView(heading("Сохрани поиск"));
+            empty.addView(
+                text(
+                    "Проверь фильтры и запусти загрузку. История цен начнёт накапливаться с первого наблюдения. Избранное доступно без интернета.",
+                    15,
+                    MUTED
+                )
+            );
+            body.addView(empty);
+        }
+        for (JSONObject r : rows.subList(0, Math.min(visibleCount, rows.size()))) {
+            LinearLayout box = card();
+            TextView p = text(price(r), 21, GREEN);
+            p.setTypeface(null, Typeface.BOLD);
+            box.addView(p);
+            box.addView(text(r.optString("title"), 17, INK));
+            box.addView(text(spec(r), 13, MUTED));
+            if (r.has("confirmedAlternatives")) box.addView(
+                text(
+                    "Подтверждённый объект · предложений: " +
+                        r.optJSONArray("confirmedAlternatives").length() +
+                        " · показана минимальная цена",
+                    12,
+                    GREEN
+                )
+            );
+            box.addView(
+                text(
+                    r.optString("source") + " · проверено " + shortDate(r.optString("lastSeen")),
+                    11,
+                    MUTED
+                )
+            );
+            LinearLayout line = row();
+            line.addView(
+                button("Открыть", () -> detail(r.optString("id"))),
+                new LinearLayout.LayoutParams(0, -2, 1)
+            );
+            line.addView(
+                button(r.optBoolean("favorite") ? "★" : "☆", () -> {
+                    db.local(r.optString("id"), "favorite", !r.optBoolean("favorite"));
+                    render();
+                }),
+                new LinearLayout.LayoutParams(dp(56), -2)
+            );
+            CheckBox cb = new CheckBox(this);
+            cb.setContentDescription("Добавить к сравнению");
+            cb.setChecked(compare.contains(r.optString("id")));
+            cb.setOnCheckedChangeListener((v, checked) -> {
+                if (checked) {
+                    if (compare.size() >= 5) {
+                        cb.setChecked(false);
+                        toast("Для сравнения выбери до 5 объектов");
+                        return;
+                    }
+                    compare.add(r.optString("id"));
+                } else compare.remove(r.optString("id"));
+            });
+            line.addView(cb);
+            box.addView(line);
+            body.addView(box);
+        }
+        if (rows.size() > visibleCount) addButton(body, "Показать ещё", () -> {
+            visibleCount += 30;
+            render();
+        });
+        JSONObject last = db.state("lastCheck", new JSONObject());
+        body.addView(
+            text(
+                last.has("at")
+                    ? "Последняя проверка: " +
+                    shortDate(last.optString("at")) +
+                    " · страниц: " +
+                    last.optInt("pages") +
+                    " · записей: " +
+                    last.optInt("imported")
+                    : "Фоновые проверки запланированы с интервалом 15 минут. Android может отложить запуск.",
+                12,
+                MUTED
+            )
+        );
+    }
+
+    private String spec(JSONObject r) {
+        List<String> s = new ArrayList<>();
+        s.add(r.optString("kind").equals("house") ? "Дом" : "Квартира");
+        if (r.has("rooms")) s.add(r.optInt("rooms") + " комн.");
+        if (r.has("area")) s.add(r.optDouble("area") + " м²");
+        if (r.has("floor")) s.add(
+            "этаж " +
+                r.optInt("floor") +
+                (r.has("floorsTotal") ? "/" + r.optInt("floorsTotal") : "")
+        );
+        if (!r.optString("district").isBlank()) s.add(r.optString("district"));
+        return String.join(" · ", s);
+    }
+
+    private String shortDate(String value) {
+        try {
+            return java.time.Instant.parse(value)
+                .atZone(java.time.ZoneId.systemDefault())
+                .format(java.time.format.DateTimeFormatter.ofPattern("dd.MM HH:mm"));
+        } catch (Exception e) {
+            return value;
+        }
+    }
+
+    private EditText input(LinearLayout parent, String label, String value, boolean numeric) {
+        parent.addView(text(label, 12, MUTED));
+        EditText field = new EditText(this);
+        field.setText(value);
+        field.setSingleLine(true);
+        field.setTextSize(16);
+        field.setInputType(
+            numeric
+                ? InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL
+                : InputType.TYPE_CLASS_TEXT
+        );
+        parent.addView(field, new LinearLayout.LayoutParams(-1, dp(48)));
+        return field;
+    }
+
+    private Spinner select(LinearLayout parent, String label, String[] items, int selected) {
+        parent.addView(text(label, 12, MUTED));
+        Spinner spinner = new Spinner(this);
+        spinner.setAdapter(
+            new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, items)
+        );
+        spinner.setSelection(Math.max(0, selected));
+        parent.addView(spinner, new LinearLayout.LayoutParams(-1, dp(48)));
+        return spinner;
+    }
+
+    private AlertDialog dialog(String title, LinearLayout content) {
+        content.setPadding(dp(18), dp(8), dp(18), dp(18));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(content);
+        return new AlertDialog.Builder(this)
+            .setTitle(title)
+            .setView(scroll)
+            .setNegativeButton("Закрыть", null)
+            .create();
+    }
+
+    private void filterDialog() {
+        LinearLayout form = column();
+        String[] cities = Arrays.stream(Sources.CITIES)
+            .map(c -> c[0])
+            .toArray(String[]::new);
+        Spinner city = select(
+            form,
+            "Город",
+            cities,
+            Arrays.asList(cities).indexOf(filters.optString("city"))
+        );
+        Spinner kind = select(
+            form,
+            "Тип жилья",
+            new String[] { "Квартиры и дома", "Квартиры", "Дома" },
+            List.of("both", "apartment", "house").indexOf(filters.optString("kind", "both"))
+        );
+        EditText district = input(
+            form,
+            "Район или адрес содержит",
+            filters.optString("district"),
+            false
+        );
+        Spinner currency = select(
+            form,
+            "Валюта бюджета",
+            new String[] { "EUR", "USD", "UAH" },
+            List.of("EUR", "USD", "UAH").indexOf(filters.optString("currency", "EUR"))
+        );
+        Map<String, EditText> fields = new LinkedHashMap<>();
+        String[][] definitions = {
+            { "priceMin", "Цена от" },
+            { "priceMax", "Цена до" },
+            { "roomsMin", "Комнат от" },
+            { "roomsMax", "Комнат до" },
+            { "areaMin", "Площадь от, м²" },
+            { "areaMax", "Площадь до, м²" },
+            { "floorMin", "Этаж от" },
+            { "floorMax", "Этаж до" },
+            { "floorsTotalMin", "Этажность здания от" },
+            { "floorsTotalMax", "Этажность здания до" },
+        };
+        for (String[] def : definitions)
+            fields.put(def[0], input(form, def[1], filters.optString(def[0], ""), true));
+        Spinner seller = select(
+            form,
+            "Продавец",
+            new String[] { "Любой / не указан", "Хозяин", "Застройщик", "Риелтор" },
+            List.of("any", "owner", "developer", "agent").indexOf(
+                filters.optString("sellerType", "any")
+            )
+        );
+        String[] previous = { filters.optString("currency", "EUR") };
+        currency.setOnItemSelectedListener(
+            new android.widget.AdapterView.OnItemSelectedListener() {
+                public void onNothingSelected(AdapterView<?> p) {}
+
+                public void onItemSelected(AdapterView<?> p, View v, int pos, long id) {
+                    String next = currency.getSelectedItem().toString();
+                    if (next.equals(previous[0])) return;
+                    for (String key : List.of("priceMin", "priceMax")) {
+                        EditText e = fields.get(key);
+                        if (!e.getText().toString().isBlank()) {
+                            try {
+                                double n = Double.parseDouble(
+                                        e.getText().toString().replace(',', '.')
+                                    ),
+                                    converted = Model.convert(n, previous[0], next, quote());
+                                if (
+                                    !Double.isFinite(converted)
+                                ) throw new IllegalArgumentException();
+                                e.setText(String.format(Locale.ROOT, "%.2f", converted));
+                            } catch (Exception ex) {
+                                currency.setSelection(
+                                    List.of("EUR", "USD", "UAH").indexOf(previous[0])
+                                );
+                                toast("Для пересчёта бюджета сначала обнови курс НБУ");
+                                return;
+                            }
+                        }
+                    }
+                    previous[0] = next;
+                }
+            }
+        );
+        AlertDialog d = dialog("Фильтры поиска", form);
+        d.setButton(AlertDialog.BUTTON_POSITIVE, "Применить", (x, w) -> {});
+        d.show();
+        d
+            .getButton(AlertDialog.BUTTON_POSITIVE)
+            .setOnClickListener(v -> {
+                try {
+                    JSONObject f = Json.object(
+                        "city",
+                        city.getSelectedItem().toString(),
+                        "kind",
+                        List.of("both", "apartment", "house").get(kind.getSelectedItemPosition()),
+                        "district",
+                        district.getText().toString().trim(),
+                        "currency",
+                        currency.getSelectedItem().toString(),
+                        "sellerType",
+                        List.of("any", "owner", "developer", "agent").get(
+                            seller.getSelectedItemPosition()
+                        )
+                    );
+                    for (Map.Entry<String, EditText> entry : fields.entrySet()) {
+                        String s = entry.getValue().getText().toString().trim().replace(',', '.');
+                        if (s.isEmpty()) continue;
+                        double n = Double.parseDouble(s);
+                        if (
+                            !Double.isFinite(n) || n < 0 || n > 1e12
+                        ) throw new IllegalArgumentException("Проверь числовые поля");
+                        if (
+                            (entry.getKey().startsWith("floor") ||
+                                entry.getKey().startsWith("rooms")) &&
+                            (n != Math.floor(n) || n > 1000)
+                        ) throw new IllegalArgumentException(
+                            "Комнаты и этажи: целые значения до 1000"
+                        );
+                        Json.put(f, entry.getKey(), n);
+                    }
+                    for (String k : List.of("price", "rooms", "area", "floor", "floorsTotal"))
+                        if (
+                            f.has(k + "Min") &&
+                            f.has(k + "Max") &&
+                            f.optDouble(k + "Min") > f.optDouble(k + "Max")
+                        ) throw new IllegalArgumentException("Значение «от» больше «до»");
+                    if (filters.has("polygon")) Json.put(f, "polygon", filters.opt("polygon"));
+                    filters = f;
+                    db.state("currentFilters", f);
+                    visibleCount = 30;
+                    d.dismiss();
+                    render();
+                } catch (Exception ex) {
+                    toast(Scanner.safe(ex));
+                }
+            });
+    }
+
+    private void saveSearch() {
+        prompt(
+            "Название поиска",
+            filters.optString("city") + " · " + filters.optString("currency"),
+            false,
+            name -> {
+                JSONObject saved = Json.object(
+                    "name",
+                    name,
+                    "enabled",
+                    true,
+                    "filters",
+                    Json.copy(filters)
+                );
+                db.saveSearch(saved);
+                requestNotifications();
+                toast("Поиск сохранён. Уведомления появятся после обнаружения новых изменений.");
+            }
+        );
+    }
+
+    private void startScan(boolean full) {
+        if (Scanner.BUSY.get()) {
+            toast("Проверка уже выполняется");
+            return;
+        }
+        if (db.searches().isEmpty()) {
+            db.saveSearch(
+                Json.object(
+                    "name",
+                    filters.optString("city"),
+                    "enabled",
+                    true,
+                    "filters",
+                    Json.copy(filters)
+                )
+            );
+            requestNotifications();
+        }
+        stopped.set(false);
+        status.setText("Подготовка самостоятельного поиска…");
+        io.execute(() -> {
+            try {
+                int n = new Scanner(this, db).scan(full, stopped::get, message ->
+                    handler.post(() -> status.setText(message))
+                );
+                handler.post(() -> {
+                    status.setText("Проверка завершена · обработано записей: " + n);
+                    render();
+                });
+            } catch (Exception e) {
+                handler.post(() -> {
+                    status.setText("Проверка прервана: " + Scanner.safe(e));
+                    render();
+                });
+            }
+        });
+    }
+
+    private void requestNotifications() {
+        if (
+            Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 10);
+    }
+
+    private void showEvents() {
+        body.addView(heading("Изменения"));
+        addButton(body, "Разрешить уведомления и звук", () -> {
+            requestNotifications();
+            startActivity(
+                new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(
+                    Settings.EXTRA_APP_PACKAGE,
+                    getPackageName()
+                )
+            );
+        });
+        List<JSONObject> events = db.events(false);
+        if (events.isEmpty()) body.addView(
+            text(
+                "Здесь появятся новые объявления и обнаруженные изменения. Первичная загрузка формирует исходную базу и не создаёт поток оповещений.",
+                15,
+                MUTED
+            )
+        );
+        for (JSONObject e : events) {
+            LinearLayout box = card();
+            box.addView(text(e.optString("title"), 17, INK));
+            box.addView(text(e.optString("message"), 14, MUTED));
+            box.addView(text(shortDate(e.optString("createdAt")), 12, MUTED));
+            addButton(box, "Открыть объект", () -> detail(e.optString("listingId")));
+            body.addView(box);
+        }
+    }
+
+    private void detail(String id) {
+        JSONObject r = db.get(id);
+        if (r == null) return;
+        LinearLayout content = column();
+        content.addView(heading(price(r)));
+        content.addView(text(r.optString("title"), 19, INK));
+        content.addView(text(spec(r) + "\n" + r.optString("address"), 15, MUTED));
+        content.addView(
+            text(
+                "Источник: " +
+                    r.optString("source") +
+                    "\nВпервые замечено: " +
+                    shortDate(r.optString("firstSeen")) +
+                    "\nПоследняя проверка: " +
+                    shortDate(r.optString("lastSeen")),
+                12,
+                MUTED
+            )
+        );
+        addButton(content, "Открыть исходное объявление", () -> open(r.optString("url")));
+        if (!r.optString("contactPhone").isBlank()) addButton(
+            content,
+            "Позвонить: " + r.optString("contactPhone"),
+            () ->
+                startActivity(
+                    new Intent(Intent.ACTION_DIAL, Uri.parse("tel:" + r.optString("contactPhone")))
+                )
+        );
+        else content.addView(
+            text(
+                "Телефон не передан источником — проверь контакты в исходном объявлении.",
+                13,
+                MUTED
+            )
+        );
+        addButton(
+            content,
+            r.optBoolean("favorite") ? "Убрать из избранного" : "Добавить в избранное",
+            () -> {
+                db.local(id, "favorite", !r.optBoolean("favorite"));
+                toast("Избранное обновлено");
+                render();
+            }
+        );
+        JSONObject watch = r.optJSONObject("watch");
+        Switch enabled = new Switch(this);
+        enabled.setText("Следить за изменениями объекта");
+        enabled.setChecked(watch != null && watch.optBoolean("enabled", true));
+        enabled.setOnCheckedChangeListener((v, on) -> {
+            JSONObject w = watch == null ? new JSONObject() : Json.copy(watch);
+            Json.put(w, "enabled", on);
+            db.local(id, "watch", w);
+            if (on) requestNotifications();
+        });
+        content.addView(enabled);
+        addButton(content, "Задать порог цены", () -> threshold(id, r));
+        EditText note = input(content, "Мои заметки", r.optString("note"), false);
+        note.setSingleLine(false);
+        note.setMinLines(3);
+        addButton(content, "Сохранить заметку", () -> {
+            db.local(id, "note", note.getText().toString());
+            toast("Заметка сохранена");
+        });
+        addButton(content, "Запланировать просмотр", () -> {
+            Intent i = new Intent(
+                Intent.ACTION_INSERT,
+                android.provider.CalendarContract.Events.CONTENT_URI
+            )
+                .putExtra(
+                    android.provider.CalendarContract.Events.TITLE,
+                    "Просмотр: " + r.optString("title")
+                )
+                .putExtra(
+                    android.provider.CalendarContract.Events.EVENT_LOCATION,
+                    r.optString("address")
+                )
+                .putExtra(android.provider.CalendarContract.Events.DESCRIPTION, r.optString("url"));
+            if (i.resolveActivity(getPackageManager()) != null) startActivity(i);
+            else toast("На телефоне не найден календарь");
+        });
+        addButton(content, "Маршрут", () -> {
+            if (r.has("latitude") && r.has("longitude")) open(
+                "https://www.google.com/maps/dir/?api=1&destination=" +
+                    r.optDouble("latitude") +
+                    "," +
+                    r.optDouble("longitude")
+            );
+            else open(
+                "https://www.google.com/maps/search/?api=1&query=" +
+                    Uri.encode(r.optString("city") + " " + r.optString("address"))
+            );
+        });
+        visitTools(content, r);
+        appendGroup(content, r);
+        content.addView(heading("История наблюдений"));
+        List<JSONObject> history = db.history(id);
+        content.addView(new PriceChart(this, history), new LinearLayout.LayoutParams(-1, dp(180)));
+        for (JSONObject h : history.subList(0, Math.min(30, history.size())))
+            content.addView(
+                text(
+                    shortDate(h.optString("observedAt")) +
+                        " · " +
+                        fmt(h.optDouble("price")) +
+                        " " +
+                        h.optString("currency"),
+                    13,
+                    MUTED
+                )
+            );
+        addButton(content, "Загрузить курсы НБУ на даты наблюдений", () ->
+            async(() -> {
+                Set<String> dates = new LinkedHashSet<>();
+                for (JSONObject h : history)
+                    dates.add(
+                        java.time.Instant.parse(h.optString("observedAt"))
+                            .atZone(Model.KYIV)
+                            .toLocalDate()
+                            .toString()
+                    );
+                int count = 0;
+                for (String date : dates) {
+                    if (count++ >= 30) break;
+                    Fx.get(db, new Network(), date);
+                }
+                handler.post(() -> historicalFx(id));
+                return "Исторические курсы загружены";
+            })
+        );
+        content.addView(
+            text(
+                "График показывает наблюдения приложения. Изменение курса НБУ не считается изменением цены продавцом.",
+                12,
+                MUTED
+            )
+        );
+        addButton(content, "Скрыть этот объект", () -> {
+            db.local(id, "hidden", true);
+            render();
+            toast("Объект скрыт");
+        });
+        dialog("Объект", content).show();
+    }
+
+    private void threshold(String id, JSONObject r) {
+        LinearLayout form = column();
+        JSONObject current = r.optJSONObject("watch");
+        EditText target = input(
+            form,
+            "Оповестить, когда цена будет не выше",
+            current == null ? "" : current.optString("target"),
+            true
+        );
+        Spinner currency = select(form, "Валюта порога", new String[] { "EUR", "USD", "UAH" }, 0);
+        AlertDialog d = dialog("Порог цены", form);
+        d.setButton(-1, "Сохранить", (a, b) -> {});
+        d.show();
+        d
+            .getButton(-1)
+            .setOnClickListener(v -> {
+                try {
+                    double n = Double.parseDouble(target.getText().toString().replace(',', '.'));
+                    if (n <= 0 || !Double.isFinite(n)) throw new IllegalArgumentException(
+                        "Укажи положительный порог"
+                    );
+                    db.local(
+                        id,
+                        "watch",
+                        Json.object(
+                            "enabled",
+                            true,
+                            "target",
+                            n,
+                            "currency",
+                            currency.getSelectedItem().toString()
+                        )
+                    );
+                    requestNotifications();
+                    d.dismiss();
+                    toast("Порог сохранён");
+                } catch (Exception e) {
+                    toast("Проверь цену порога");
+                }
+            });
+    }
+
+    private void comparison() {
+        LinearLayout content = column();
+        if (compare.size() < 2) {
+            toast("Отметь от 2 до 5 объектов галочками");
+            return;
+        }
+        for (String id : compare) {
+            JSONObject r = db.get(id);
+            if (r == null) continue;
+            LinearLayout box = card();
+            box.addView(text(r.optString("title"), 17, INK));
+            box.addView(text(price(r), 19, GREEN));
+            box.addView(text(spec(r), 14, MUTED));
+            if (r.optDouble("area", 0) > 0) box.addView(
+                text(
+                    "За м²: " +
+                        fmt(r.optDouble("price") / r.optDouble("area")) +
+                        " " +
+                        r.optString("currency"),
+                    14,
+                    INK
+                )
+            );
+            box.addView(text(r.optString("note"), 13, MUTED));
+            content.addView(box);
+        }
+        addButton(
+            content,
+            "Подтвердить: выбранные объявления — один объект",
+            this::confirmCompared
+        );
+        addButton(content, "Очистить сравнение", () -> {
+            compare.clear();
+            render();
+        });
+        dialog("Сравнение объектов", content).show();
+    }
+
+    private void showMore() {
+        body.addView(heading("Поиски и настройки"));
+        for (JSONObject s : db.searches()) {
+            LinearLayout box = card();
+            box.addView(text(s.optString("name"), 17, INK));
+            Switch active = new Switch(this);
+            active.setText("Проверять и уведомлять");
+            active.setChecked(s.optBoolean("enabled", true));
+            active.setOnCheckedChangeListener((v, on) -> {
+                Json.put(s, "enabled", on);
+                db.saveSearch(s);
+            });
+            box.addView(active);
+            addButton(box, "Открыть поиск", () -> {
+                filters = Json.copy(s.optJSONObject("filters"));
+                db.state("currentFilters", filters);
+                tab = "Поиск";
+                render();
+            });
+            addButton(box, "Удалить поиск", () -> {
+                db.deleteSearch(s.optString("id"));
+                render();
+            });
+            body.addView(box);
+        }
+        addButton(body, "Добавить ссылку на объявление", () -> addUrl(""));
+        addButton(body, "Добавить объект вручную", this::manual);
+        addButton(body, "Источники и ход обхода", this::sourceStatus);
+        addButton(body, "Проверить вероятные дубли", this::duplicateCandidates);
+        addButton(body, "Фон, уведомления и экономия заряда", this::settings);
+        addButton(body, "API-ключ DIM.RIA", this::keyDialog);
+        addButton(body, "Обновить официальный курс НБУ", () ->
+            async(() -> {
+                Fx.get(db, new Network(), Model.date());
+                return "Курс НБУ обновлён";
+            })
+        );
+        addButton(body, "Зашифрованная резервная копия", () ->
+            prompt("Пароль копии: от 10 символов", "", true, password ->
+                async(() -> {
+                    exportBytes = Backup.encrypt(db.exportData(), password.toCharArray());
+                    handler.post(() -> createDocument("DomTrack-backup-" + Model.date() + ".json"));
+                    return "Выбери место сохранения";
+                })
+            )
+        );
+        addButton(body, "Импорт / восстановление с ПК", () -> {
+            Intent i = new Intent(Intent.ACTION_OPEN_DOCUMENT)
+                .setType("application/json")
+                .addCategory(Intent.CATEGORY_OPENABLE);
+            startActivityForResult(i, 22);
+        });
+        addButton(body, "Экспорт объявлений для ПК", () ->
+            async(() -> {
+                JSONObject exported = db.exportData();
+                Json.put(exported, "format", "domtrack-export");
+                exportBytes = exported.toString(2).getBytes(StandardCharsets.UTF_8);
+                handler.post(() -> createDocument("DomTrack-for-PC-" + Model.date() + ".json"));
+                return "Экспорт содержит личные объявления и заметки";
+            })
+        );
+        body.addView(
+            text(
+                "Телефон выполняет поиск самостоятельно. Обмен файлами с ПК — дополнительная возможность. API-ключ в резервную копию не включается.",
+                13,
+                MUTED
+            )
+        );
+        body.addView(
+            text(
+                "DomTrack UA Android 0.1.0 · локальная версия\nКарты: © OpenStreetMap contributors",
+                12,
+                MUTED
+            )
+        );
+    }
+
+    private void settings() {
+        LinearLayout form = column();
+        JSONObject settings = db.state("settings", new JSONObject());
+        toggle(form, "Автоматические проверки каждые 15 минут", settings, "background", true);
+        toggle(form, "Только Wi-Fi / безлимитная сеть", settings, "wifiOnly", false);
+        toggle(form, "Тихие часы: 23:00–08:00", settings, "quiet", true);
+        for (int i = 0; i < Alerts.TYPES.length; i++) toggle(
+            form,
+            Alerts.TITLES[i],
+            settings,
+            "alert_" + Alerts.TYPES[i],
+            true
+        );
+        addButton(form, "Настроить звук и вибрацию по типам событий", () ->
+            startActivity(
+                new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(
+                    Settings.EXTRA_APP_PACKAGE,
+                    getPackageName()
+                )
+            )
+        );
+        form.addView(
+            text(
+                "Android может сдвигать время запуска. Короткая проверка обрабатывает 2 страницы по мобильной сети или 4 по Wi-Fi, затем сохраняет очередь. Полный обход продолжается при открытом приложении. Расход батареи зависит от числа поисков и ответа сайтов.",
+                13,
+                MUTED
+            )
+        );
+        dialog("Автоматическая работа", form).show();
+    }
+
+    private void toggle(
+        LinearLayout parent,
+        String label,
+        JSONObject settings,
+        String key,
+        boolean fallback
+    ) {
+        Switch s = new Switch(this);
+        s.setText(label);
+        s.setTextSize(15);
+        s.setPadding(0, dp(12), 0, dp(12));
+        s.setChecked(settings.optBoolean(key, fallback));
+        s.setOnCheckedChangeListener((v, on) -> {
+            Json.put(settings, key, on);
+            db.state("settings", settings);
+            ((DomTrackApp) getApplication()).schedule();
+        });
+        parent.addView(s);
+    }
+
+    private void keyDialog() {
+        LinearLayout form = column();
+        Secrets secrets = new Secrets(this);
+        form.addView(
+            text(
+                secrets.configured()
+                    ? "API-ключ сохранён на этом телефоне. Введи новый, чтобы заменить его."
+                    : "Ключ с компьютера автоматически не переносится. Введи собственный ключ из кабинета RIA.",
+                14,
+                MUTED
+            )
+        );
+        EditText field = input(form, "API-ключ", "", false);
+        field.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        addButton(form, "Сохранить ключ", () ->
+            async(() -> {
+                secrets.set(field.getText().toString().trim());
+                handler.post(() -> field.setText(""));
+                return "Ключ сохранён в зашифрованном виде";
+            })
+        );
+        addButton(form, "Удалить ключ", () ->
+            async(() -> {
+                secrets.set("");
+                return "Ключ удалён";
+            })
+        );
+        addButton(form, "Загрузить следующую порцию API", () ->
+            async(() -> "Обработано объектов RIA: " + new Ria(this, db).next(filters))
+        );
+        form.addView(
+            text(
+                "Официальный API использует отдельные квоты. Открытые каталоги работают независимо от ключа.",
+                13,
+                MUTED
+            )
+        );
+        dialog("DIM.RIA", form).show();
+    }
+
+    private void sourceStatus() {
+        LinearLayout content = column();
+        for (Sources.Section section : Sources.sections(
+            filters.optString("city"),
+            filters.optString("kind", "both")
+        )) {
+            JSONObject s = db.state("section:" + section.key(), new JSONObject());
+            LinearLayout box = card();
+            box.addView(
+                text(
+                    section.source + " · " + (section.kind.equals("house") ? "дома" : "квартиры"),
+                    17,
+                    INK
+                )
+            );
+            box.addView(
+                text(
+                    "Проверено: " +
+                        shortDate(s.optString("checkedAt", "ещё не проверено")) +
+                        "\nСледующая страница: " +
+                        s.optInt("nextPage", 1) +
+                        "\n" +
+                        (s.optBoolean("complete")
+                                ? "Обход раздела завершён"
+                                : "Полный обход ещё не завершён") +
+                        (s.optString("error").isBlank() ? "" : "\n" + s.optString("error")),
+                    13,
+                    MUTED
+                )
+            );
+            content.addView(box);
+        }
+        content.addView(
+            text(
+                "Подключены проверенные маршруты: Rieltor для городов списка; DOM.RIA, OBYAVA и Domik — для Запорожья. Отдельные ссылки можно импортировать при наличии однозначных данных продажи. Это не весь интернет.",
+                13,
+                MUTED
+            )
+        );
+        dialog("Охват источников", content).show();
+    }
+
+    private void addUrl(String initial) {
+        prompt("Ссылка на объявление", initial, false, url ->
+            async(() -> "Загружено объектов: " + new Scanner(this, db).importUrl(url))
+        );
+    }
+
+    private void manual() {
+        LinearLayout form = column();
+        EditText url = input(form, "HTTPS-ссылка", "", false),
+            title = input(form, "Заголовок", "", false),
+            city = input(form, "Город", filters.optString("city"), false),
+            amount = input(form, "Полная цена объекта", "", true);
+        Spinner currency = select(form, "Валюта", new String[] { "EUR", "USD", "UAH" }, 0),
+            kind = select(form, "Тип", new String[] { "Квартира", "Дом" }, 0);
+        EditText phone = input(form, "Открытый контактный телефон", "", false);
+        AlertDialog d = dialog("Добавить наблюдение", form);
+        d.setButton(-1, "Сохранить", (a, b) -> {});
+        d.show();
+        d
+            .getButton(-1)
+            .setOnClickListener(v -> {
+                try {
+                    JSONObject r = Json.object(
+                        "url",
+                        url.getText().toString(),
+                        "title",
+                        title.getText().toString(),
+                        "city",
+                        city.getText().toString(),
+                        "price",
+                        Double.parseDouble(amount.getText().toString().replace(',', '.')),
+                        "currency",
+                        currency.getSelectedItem().toString(),
+                        "kind",
+                        kind.getSelectedItemPosition() == 0 ? "apartment" : "house",
+                        "deal",
+                        "sale",
+                        "source",
+                        "manual",
+                        "observedAt",
+                        Model.now(),
+                        "contactPhone",
+                        phone.getText().toString()
+                    );
+                    Model.validate(r);
+                    db.ingest(List.of(r), false);
+                    d.dismiss();
+                    render();
+                } catch (Exception e) {
+                    toast(Scanner.safe(e));
+                }
+            });
+    }
+
+    private void map() {
+        try {
+            LinearLayout content = column();
+            content.addView(
+                text(
+                    "Точки показывают координаты источников; точность может быть неизвестна. Включи рисование и нажимай на карту, чтобы задать границу.",
+                    13,
+                    MUTED
+                )
+            );
+            WebView web = new WebView(this);
+            web.getSettings().setJavaScriptEnabled(true);
+            web.getSettings().setAllowFileAccess(false);
+            web.getSettings().setAllowContentAccess(false);
+            web.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
+            web.getSettings().setUserAgentString(Network.AGENT);
+            web.setWebViewClient(
+                new WebViewClient() {
+                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
+                        return true;
+                    }
+                }
+            );
+            String html = asset("map.html")
+                .replace("/*LEAFLET_CSS*/", asset("leaflet.css"))
+                .replace("/*LEAFLET_JS*/", asset("leaflet.js"));
+            JSONArray points = new JSONArray();
+            for (JSONObject r : db.listings())
+                if (
+                    Model.matches(r, filters, quote()) && r.has("latitude") && r.has("longitude")
+                ) points.put(
+                    Json.object(
+                        "lat",
+                        r.optDouble("latitude"),
+                        "lon",
+                        r.optDouble("longitude"),
+                        "title",
+                        r.optString("title"),
+                        "price",
+                        price(r)
+                    )
+                );
+            html = html
+                .replace("/*POINT_DATA*/", points.toString().replace("<", "\\u003c"))
+                .replace(
+                    "/*ZONE_DATA*/",
+                    filters.optJSONArray("polygon") == null
+                        ? "[]"
+                        : filters.optJSONArray("polygon").toString()
+                );
+            web.loadDataWithBaseURL(
+                "https://appassets.androidplatform.net/",
+                html,
+                "text/html",
+                "UTF-8",
+                null
+            );
+            content.addView(web, new LinearLayout.LayoutParams(-1, dp(420)));
+            addButton(content, "Рисовать / закончить границу", () ->
+                web.evaluateJavascript("window.drawing=!window.drawing", null)
+            );
+            addButton(content, "Сохранить территорию фильтра", () ->
+                web.evaluateJavascript("JSON.stringify(window.zone)", value -> {
+                    try {
+                        JSONArray zone = new JSONArray(
+                            new JSONTokener(value).nextValue().toString()
+                        );
+                        if (zone.length() < 3) throw new IllegalArgumentException();
+                        Json.put(filters, "polygon", zone);
+                        db.state("currentFilters", filters);
+                        toast(
+                            "Территория сохранена. Объекты без координат не попадут в этот фильтр."
+                        );
+                        render();
+                    } catch (Exception e) {
+                        toast("Нужно минимум 3 точки границы");
+                    }
+                })
+            );
+            addButton(content, "Убрать территорию", () -> {
+                filters.remove("polygon");
+                db.state("currentFilters", filters);
+                web.evaluateJavascript("window.zone=[];window.redraw()", null);
+                render();
+            });
+            AlertDialog d = dialog("Карта объектов", content);
+            d.setOnDismissListener(x -> web.destroy());
+            d.show();
+        } catch (Exception e) {
+            toast("Карта недоступна: " + Scanner.safe(e));
+        }
+    }
+
+    private String asset(String name) throws IOException {
+        try (InputStream in = getAssets().open(name)) {
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    private void prompt(String title, String initial, boolean secret, Consumer<String> action) {
+        LinearLayout form = column();
+        EditText e = input(form, title, initial, false);
+        if (secret) e.setInputType(
+            InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD
+        );
+        AlertDialog d = dialog(title, form);
+        d.setButton(-1, "Продолжить", (a, b) -> {});
+        d.show();
+        d
+            .getButton(-1)
+            .setOnClickListener(v -> {
+                String s = e.getText().toString().trim();
+                if (s.isBlank()) {
+                    e.setError("Заполни поле");
+                    return;
+                }
+                d.dismiss();
+                action.accept(s);
+            });
+    }
+
+    private interface Task {
+        String run() throws Exception;
+    }
+
+    private void async(Task task) {
+        io.execute(() -> {
+            try {
+                String result = task.run();
+                handler.post(() -> {
+                    toast(result);
+                    render();
+                });
+            } catch (Exception e) {
+                handler.post(() -> toast(Scanner.safe(e)));
+            }
+        });
+    }
+
+    private void toast(String text) {
+        Toast.makeText(this, text, Toast.LENGTH_LONG).show();
+    }
+
+    private void open(String value) {
+        try {
+            Uri uri = Uri.parse(value);
+            if (!"https".equals(uri.getScheme())) throw new IllegalArgumentException();
+            startActivity(new Intent(Intent.ACTION_VIEW, uri));
+        } catch (Exception e) {
+            toast("Не удалось открыть ссылку");
+        }
+    }
+
+    private void createDocument(String name) {
+        startActivityForResult(
+            new Intent(Intent.ACTION_CREATE_DOCUMENT)
+                .setType("application/json")
+                .putExtra(Intent.EXTRA_TITLE, name)
+                .addCategory(Intent.CATEGORY_OPENABLE),
+            21
+        );
+    }
+
+    protected void onActivityResult(int request, int result, Intent data) {
+        super.onActivityResult(request, result, data);
+        if (result != RESULT_OK || data == null || data.getData() == null) return;
+        Uri uri = data.getData();
+        if (request == 23) {
+            String listing = pendingPhotoListing;
+            pendingPhotoListing = null;
+            if (listing != null) async(() -> {
+                JSONObject state = db.state(
+                    "photos:" + listing,
+                    Json.object("items", new JSONArray())
+                );
+                JSONArray photos = state.optJSONArray("items");
+                if (photos.length() >= 3) throw new IllegalArgumentException(
+                    "В этой версии до трёх личных фотографий на объект"
+                );
+                photos.put(Photos.selected(this, uri));
+                db.state("photos:" + listing, state);
+                return "Фотография сохранена на телефоне";
+            });
+            return;
+        }
+        if (request == 21) {
+            byte[] bytes = exportBytes;
+            exportBytes = null;
+            if (bytes == null) return;
+            async(() -> {
+                try (OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
+                    if (out == null) throw new IOException("Файл недоступен");
+                    out.write(bytes);
+                }
+                return "Файл сохранён";
+            });
+        } else if (request == 22) async(() -> {
+            String text;
+            try (InputStream in = getContentResolver().openInputStream(uri)) {
+                if (in == null) throw new IOException("Файл недоступен");
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                byte[] b = new byte[8192];
+                int n;
+                while ((n = in.read(b)) != -1) {
+                    if (out.size() + n > 16 * 1024 * 1024) throw new IOException(
+                        "Файл больше 16 МБ"
+                    );
+                    out.write(b, 0, n);
+                }
+                text = out.toString(StandardCharsets.UTF_8);
+            }
+            JSONObject object = Json.obj(text);
+            if (object.optString("format").equals("domtrack-encrypted")) {
+                String encrypted = text;
+                handler.post(() ->
+                    prompt("Пароль резервной копии", "", true, password ->
+                        async(
+                            () ->
+                                "Восстановлено записей: " +
+                                Backup.restore(
+                                    db,
+                                    Backup.decrypt(encrypted, password.toCharArray())
+                                )
+                        )
+                    )
+                );
+                return "Введи пароль копии";
+            }
+            return "Импортировано записей: " + Backup.restore(db, object);
+        });
+    }
+
+    private void confirmCompared() {
+        if (compare.size() < 2) {
+            toast("Отметь хотя бы два объявления");
+            return;
+        }
+        List<JSONObject> rows = compare.stream().map(db::get).filter(Objects::nonNull).toList();
+        if (
+            rows
+                .stream()
+                .map(r -> Model.normalized(r.optString("city")) + ":" + r.optString("kind"))
+                .distinct()
+                .count() !=
+            1
+        ) {
+            toast("Для объединения нужны один город и один тип жилья");
+            return;
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("Это один объект?")
+            .setMessage(
+                "После подтверждения в подборке будет показана самая низкая сопоставимая цена. Исходные объявления и их истории сохранятся."
+            )
+            .setNegativeButton("Отмена", null)
+            .setPositiveButton("Подтверждаю", (d, w) -> {
+                String group = "user-" + UUID.randomUUID();
+                for (JSONObject r : rows) db.local(r.optString("id"), "sameGroup", group);
+                compare.clear();
+                render();
+                toast("Совпадение подтверждено");
+            })
+            .show();
+    }
+
+    private void duplicateCandidates() {
+        LinearLayout content = column();
+        Map<String, List<JSONObject>> buckets = new LinkedHashMap<>();
+        for (JSONObject r : db.listings()) {
+            String address = Dedupe.address(r);
+            if (address.isBlank()) continue;
+            String key =
+                Model.normalized(r.optString("city")) + ":" + r.optString("kind") + ":" + address;
+            buckets.computeIfAbsent(key, k -> new ArrayList<>()).add(r);
+        }
+        int count = 0,
+            checks = 0;
+        outer: for (List<JSONObject> bucket : buckets.values())
+            for (int i = 0; i < bucket.size(); i++) for (int j = i + 1; j < bucket.size(); j++) {
+                if (++checks > 50000 || count >= 50) break outer;
+                JSONObject a = bucket.get(i),
+                    b = bucket.get(j);
+                if (
+                    !a.optString("sameGroup").isBlank() &&
+                    a.optString("sameGroup").equals(b.optString("sameGroup"))
+                ) continue;
+                String[] ids = { a.optString("id"), b.optString("id") };
+                Arrays.sort(ids);
+                String rule = "different:" + ids[0] + ":" + ids[1];
+                if (db.state(rule, new JSONObject()).optBoolean("different")) continue;
+                List<String> evidence = Dedupe.evidence(a, b, quote());
+                if (evidence.isEmpty()) continue;
+                count++;
+                LinearLayout box = card();
+                box.addView(
+                    text(
+                        a.optString("title") +
+                            "\n" +
+                            price(a) +
+                            "\n\n" +
+                            b.optString("title") +
+                            "\n" +
+                            price(b),
+                        16,
+                        INK
+                    )
+                );
+                box.addView(
+                    text(
+                        String.join("\n", evidence) +
+                            "\nЭто вероятное совпадение; объявления остаются отдельными.",
+                        13,
+                        MUTED
+                    )
+                );
+                addButton(box, "Сравнить и подтвердить", () -> {
+                    compare.clear();
+                    compare.add(a.optString("id"));
+                    compare.add(b.optString("id"));
+                    comparison();
+                });
+                addButton(box, "Это разные объекты", () -> {
+                    db.state(rule, Json.object("different", true));
+                    toast("Указано: разные объекты");
+                });
+                content.addView(box);
+            }
+        if (count == 0) content.addView(
+            text(
+                "Доказательств для вероятных дублей пока недостаточно. Можно самостоятельно сравнить и подтвердить выбранные объявления.",
+                15,
+                MUTED
+            )
+        );
+        if (count >= 50 || checks > 50000) content.addView(
+            text(
+                "Показана ограниченная порция совпадений; остальные исходные объявления сохранены.",
+                13,
+                MUTED
+            )
+        );
+        dialog("Вероятные дубли", content).show();
+    }
+
+    private void appendGroup(LinearLayout content, JSONObject r) {
+        String group = r.optString("sameGroup");
+        if (group.isBlank()) return;
+        content.addView(heading("Подтверждённые предложения"));
+        for (JSONObject other : db.listings())
+            if (other.optString("sameGroup").equals(group)) {
+                content.addView(text(price(other) + " · " + other.optString("source"), 14, INK));
+                addButton(content, "Открыть: " + other.optString("source"), () ->
+                    detail(other.optString("id"))
+                );
+            }
+        addButton(content, "Отменить объединение объекта", () -> {
+            for (JSONObject other : db.listings())
+                if (other.optString("sameGroup").equals(group)) db.local(
+                    other.optString("id"),
+                    "sameGroup",
+                    ""
+                );
+            render();
+            toast("Исходные объявления снова показаны отдельно");
+        });
+    }
+
+    private void historicalFx(String id) {
+        LinearLayout content = column();
+        for (JSONObject h : db.history(id)) {
+            String date = java.time.Instant.parse(h.optString("observedAt"))
+                .atZone(Model.KYIV)
+                .toLocalDate()
+                .toString();
+            JSONObject rates = db.state("fx:" + date, new JSONObject()).optJSONObject("rates");
+            double rate = h.optString("currency").equals("UAH")
+                ? 1
+                : rates == null
+                    ? Double.NaN
+                    : rates.optDouble(h.optString("currency"), Double.NaN);
+            content.addView(
+                text(
+                    shortDate(h.optString("observedAt")) +
+                        " · " +
+                        fmt(h.optDouble("price")) +
+                        " " +
+                        h.optString("currency") +
+                        "\n" +
+                        (Double.isFinite(rate)
+                                ? fmt(h.optDouble("price") * rate) + " UAH · НБУ " + date
+                                : "Курс на дату наблюдения недоступен"),
+                    14,
+                    INK
+                )
+            );
+        }
+        dialog("Цена и курс на дату наблюдения", content).show();
+    }
+
+    protected void onSaveInstanceState(Bundle state) {
+        super.onSaveInstanceState(state);
+        state.putString("pendingPhotoListing", pendingPhotoListing);
+    }
+
+    private void visitTools(LinearLayout content, JSONObject r) {
+        String id = r.optString("id");
+        content.addView(heading("Мой просмотр"));
+        Switch visited = new Switch(this);
+        visited.setText("Уже осмотрел объект");
+        visited.setChecked(r.optBoolean("visited"));
+        visited.setOnCheckedChangeListener((v, on) -> db.local(id, "visited", on));
+        content.addView(visited);
+        JSONObject checklist = r.optJSONObject("checklist");
+        if (checklist == null) checklist = new JSONObject();
+        final JSONObject marks = checklist;
+        for (String label : List.of(
+            "Задал вопросы о документах",
+            "Осмотрел стены и окна",
+            "Проверил отопление и воду",
+            "Уточнил текущие расходы",
+            "Сохранил вопросы продавцу"
+        )) {
+            CheckBox item = new CheckBox(this);
+            item.setText(label);
+            item.setChecked(marks.optBoolean(label));
+            item.setOnCheckedChangeListener((v, on) -> {
+                Json.put(marks, label, on);
+                db.local(id, "checklist", marks);
+            });
+            content.addView(item);
+        }
+        JSONArray photos = db
+            .state("photos:" + id, Json.object("items", new JSONArray()))
+            .optJSONArray("items");
+        for (int i = 0; i < Math.min(3, photos.length()); i++) {
+            android.graphics.Bitmap bitmap = Photos.bitmap(photos.optString(i));
+            if (bitmap != null) {
+                ImageView image = new ImageView(this);
+                image.setContentDescription("Моя фотография объекта");
+                image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+                image.setImageBitmap(bitmap);
+                content.addView(image, new LinearLayout.LayoutParams(-1, dp(180)));
+            }
+        }
+        addButton(content, "Добавить мою фотографию", () -> {
+            pendingPhotoListing = id;
+            startActivityForResult(
+                new Intent(android.provider.MediaStore.ACTION_PICK_IMAGES).setType("image/*"),
+                23
+            );
+        });
+    }
 }
