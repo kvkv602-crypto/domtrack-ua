@@ -1,0 +1,5 @@
+<lint>
+    <issue id="HardcodedText" severity="warning" />
+    <issue id="SetTextI18n" severity="warning" />
+    <issue id="ObsoleteSdkInt" severity="warning" />
+</lint>

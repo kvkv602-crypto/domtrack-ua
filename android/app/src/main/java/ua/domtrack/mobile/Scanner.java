@@ -1,0 +1,37 @@
+package ua.domtrack.mobile;
+
+import android.content.Context;
+import android.net.*;
+import org.json.*;
+import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.*;
+
+final class Scanner {
+    static final AtomicBoolean BUSY=new AtomicBoolean();
+    private final Context context;private final Database db;private final Network net=new Network();
+    Scanner(Context c,Database d){context=c.getApplicationContext();db=d;}
+    int scan(boolean deep,BooleanSupplier stop,Consumer<String> progress)throws Exception{if(!BUSY.compareAndSet(false,true))return 0;long started=System.currentTimeMillis();int imported=0,attempted=0;JSONArray failures=new JSONArray();try{
+        try{Fx.get(db,net,Model.date());}catch(Exception e){failures.put("Не удалось получить сегодняшний курс НБУ; исходные цены сохранены");}
+        List<Sources.Section> sections=new ArrayList<>();for(JSONObject search:db.searches()){if(!search.optBoolean("enabled",true))continue;JSONObject f=search.optJSONObject("filters");if(f==null)continue;for(Sources.Section s:Sources.sections(f.optString("city"),f.optString("kind","both")))if(sections.stream().noneMatch(x->x.key().equals(s.key())))sections.add(s);}
+        if(sections.isEmpty())return 0;
+        boolean metered=context.getSystemService(ConnectivityManager.class).isActiveNetworkMetered();JSONObject schedule=db.state("scanSchedule",new JSONObject());int cursor=schedule.optInt("cursor",0),budget=deep?Integer.MAX_VALUE:metered?2:4;long limit=deep?Long.MAX_VALUE:55000L;
+        Set<String> failed=new HashSet<>();while(attempted<budget&&!stop.getAsBoolean()&&System.currentTimeMillis()-started<limit){Sources.Section section=sections.get(Math.floorMod(cursor++,sections.size()));JSONObject state=db.state("section:"+section.key(),new JSONObject());if(failed.contains(section.key())){if(failed.size()==sections.size())break;continue;}if(deep&&state.optBoolean("complete")){if(sections.stream().allMatch(s->db.state("section:"+s.key(),new JSONObject()).optBoolean("complete")))break;continue;}if(state.optLong("retryAfter")>System.currentTimeMillis()){failed.add(section.key());continue;}
+            // Alternate front-page updates and persisted catalog continuation. Every section gets a turn.
+            boolean front=!deep&&state.optBoolean("frontNext",true);int page=front?1:state.optInt("nextPage",1);if(page>10000){failed.add(section.key());Json.put(state,"error","Достигнут защитный предел страниц; обход не завершён");db.state("section:"+section.key(),state);continue;}
+            if(progress!=null)progress.accept(section.source+" · "+section.city+" · "+(section.kind.equals("house")?"дома":"квартиры")+" · страница "+page);attempted++;
+            try{String url=section.page(page);if(!net.robotsAllowed(url,db))throw new IllegalArgumentException("robots.txt ограничивает автоматическую загрузку этого раздела");JSONObject cache=db.state("cache:"+Model.hash(url),new JSONObject());Network.Page response=net.get(url,cache.optString("etag"),cache.optString("modified"));if(response.status==304){Json.put(state,"checkedAt",Model.now());Json.put(state,"frontNext",!front);db.state("section:"+section.key(),state);continue;}
+                Sources.Result result=Sources.parse(response.body,response.url,section,page);if(page>1&&state.optString("fingerprint").equals(result.fingerprint))throw new IllegalArgumentException("Сайт повторил предыдущую страницу; обход приостановлен");
+                boolean baseline=cache.optBoolean("observed",false);imported+=db.ingest(result.records,baseline);db.state("cache:"+Model.hash(url),Json.object("observed",true,"etag",response.etag,"modified",response.modified));Json.put(state,"checkedAt",Model.now());Json.put(state,"lastPage",page);Json.put(state,"lastCount",result.records.size());Json.put(state,"error","");Json.put(state,"failures",0);Json.put(state,"retryAfter",0);Json.put(state,"frontNext",!front);
+                if(!front||page==1&&state.optInt("nextPage",1)==1){Json.put(state,"nextPage",result.end?1:page+1);Json.put(state,"complete",result.end);Json.put(state,"fingerprint",result.fingerprint);}db.state("section:"+section.key(),state);
+                if(!deep&&state.optBoolean("complete"))Json.put(state,"frontNext",true);
+            }catch(Exception e){failed.add(section.key());int n=state.optInt("failures",0)+1;Json.put(state,"error",safe(e));Json.put(state,"failures",n);Json.put(state,"retryAfter",System.currentTimeMillis()+Math.min(21600000L,900000L*(1L<<Math.min(4,n-1))));db.state("section:"+section.key(),state);failures.put(section.source+": "+safe(e));}
+            db.state("scanSchedule",Json.object("cursor",cursor));if(!stop.getAsBoolean())Thread.sleep(2000);
+        }
+        // Individually watched structured pages are independent of the PC and catalog order.
+        if(!stop.getAsBoolean()&&System.currentTimeMillis()-started<limit){int checked=0;for(JSONObject r:db.listings()){if(checked>=2||stop.getAsBoolean()||System.currentTimeMillis()-started>=limit)break;JSONObject watch=r.optJSONObject("watch");if(watch==null||!watch.optBoolean("enabled",true)||!r.optBoolean("structured"))continue;checked++;try{String url=r.optString("url");if(net.robotsAllowed(url,db))imported+=db.ingest(Sources.structured(net.get(url).body,url),true);}catch(Exception e){failures.put("Наблюдение: "+safe(e));}}}
+        Alerts.deliver(context,db);db.state("lastCheck",Json.object("at",Model.now(),"durationMs",System.currentTimeMillis()-started,"pages",attempted,"imported",imported,"errors",failures,"stopped",stop.getAsBoolean(),"mode",deep?"full":"background"));return imported;
+    }finally{BUSY.set(false);}}
+    static String safe(Exception e){String s=Objects.toString(e.getMessage(),"Ошибка загрузки");if(s.contains("api_key")||s.contains("https://"))return "Не удалось загрузить источник";return s.substring(0,Math.min(240,s.length()));}
+    int importUrl(String url)throws Exception{Network.safe(url);if(!net.robotsAllowed(url,db))throw new IllegalArgumentException("Источник ограничивает автоматическую загрузку");List<JSONObject> rows=Sources.structured(net.get(url).body,url);for(JSONObject r:rows)Json.put(r,"structured",true);return db.ingest(rows,false);}
+}
