@@ -33,7 +33,7 @@ final class Dedupe {
     }
 
     static String address(JSONObject r) {
-        String s = Model.normalized(r.optString("address")).replaceAll(
+        String s = Bilingual.text(r.optString("address")).replaceAll(
             "(?iu)(?:^|[ ,])(?:вул(?:иця)?|ул(?:ица)?|street)\\.? *",
             " "
         );
@@ -51,7 +51,7 @@ final class Dedupe {
     static List<String> evidence(JSONObject a, JSONObject b, JSONObject quote) {
         List<String> out = new ArrayList<>();
         if (
-            !Model.normalized(a.optString("city")).equals(Model.normalized(b.optString("city"))) ||
+            !Bilingual.city(a.optString("city")).equals(Bilingual.city(b.optString("city"))) ||
             !a.optString("kind").equals(b.optString("kind"))
         ) return out;
         String address = address(a);
@@ -68,8 +68,8 @@ final class Dedupe {
         if (
             aa <= 0 || ba <= 0 || Math.abs(aa - ba) > Math.max(.5, Math.min(aa, ba) * .005)
         ) return out;
-        Set<String> aw = words(a.optString("title")),
-            bw = words(b.optString("title"));
+        Set<String> aw = words(a.optString("title") + " " + a.optString("description")),
+            bw = words(b.optString("title") + " " + b.optString("description"));
         aw.removeAll(words(a.optString("city") + " " + a.optString("address")));
         bw.removeAll(words(b.optString("city") + " " + b.optString("address")));
         long common = aw.stream().filter(bw::contains).count();
@@ -110,10 +110,21 @@ final class Dedupe {
         Map<String, List<JSONObject>> groups = new LinkedHashMap<>();
         for (JSONObject r : rows) {
             String group = r.optString("sameGroup");
+            if (group.isBlank()) {
+                String url = r.optString("url");
+                java.util.regex.Matcher identity = java.util.regex.Pattern.compile(
+                    "https://dom\\.ria\\.com/(?:uk/)?realty-prodaja-[a-z0-9-]+-([0-9]+)\\.html(?:[?#].*)?$"
+                ).matcher(url);
+                if (identity.matches()) group = "source:dom.ria.com:" + identity.group(1);
+            }
             if (group.isBlank()) out.add(r);
             else groups.computeIfAbsent(group, k -> new ArrayList<>()).add(r);
         }
         for (List<JSONObject> group : groups.values()) {
+            if (group.size() == 1) {
+                out.add(group.get(0));
+                continue;
+            }
             boolean comparable = group
                 .stream()
                 .allMatch(r ->

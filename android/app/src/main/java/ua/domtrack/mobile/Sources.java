@@ -65,7 +65,7 @@ final class Sources {
     static List<Section> sections(String city, String kind) {
         List<Section> out = new ArrayList<>();
         String[] row = Arrays.stream(CITIES)
-            .filter(c -> c[0].equals(city))
+            .filter(c -> Bilingual.city(c[0]).equals(Bilingual.city(city)))
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException("Выберите город из списка"));
         for (String k : List.of("apartment", "house")) {
@@ -81,7 +81,7 @@ final class Sources {
                         (k.equals("house") ? "houses-sale/" : "flats-sale/")
                 )
             );
-            if (city.equals("Запоріжжя")) {
+            if (Bilingual.city(city).equals("запоріжжя")) {
                 out.add(
                     new Section(
                         "domria-web",
@@ -128,16 +128,24 @@ final class Sources {
         final int cards;
 
         Result(List<JSONObject> r, boolean e, int count) {
-            records = r;
-            end = e;
-            cards = count;
-            fingerprint = Model.hash(
+            this(
+                r,
+                e,
+                count,
                 r
                     .stream()
                     .map(o -> o.optString("url"))
-                    .sorted()
-                    .reduce("", (a, b) -> a + "\n" + b)
+                    .toList()
             );
+        }
+
+        Result(List<JSONObject> r, boolean e, int count, List<String> observed) {
+            records = r;
+            end = e;
+            cards = count;
+            fingerprint = observed.isEmpty()
+                ? ""
+                : Model.hash(String.join("\n", new TreeSet<>(observed)));
         }
     }
 
@@ -179,7 +187,12 @@ final class Sources {
     }
 
     static JSONObject price(String input, boolean prefix) {
-        String s = input.replace('\u00a0', ' ').replace('\u202f', ' ').replace("\u2060", "").trim();
+        String s = input
+            .replace('\u00a0', ' ')
+            .replace('\u202f', ' ')
+            .replace("\u2060", "")
+            .trim()
+            .replaceFirst("(?iu)\\s+торг$", "");
         if (prefix) s = s.replaceFirst("^([$€])\\s*(.+)$", "$2 $1");
         Matcher m = Pattern.compile(
             "^(\\d[\\d ]*(?:[.,]\\d{1,2})?)\\s*(\\$|€|грн\\.?|USD|EUR|UAH)$",
@@ -217,8 +230,25 @@ final class Sources {
 
     static void params(String text, JSONObject r) {
         for (String part : text.split("[|;\\n]")) {
+            java.util.regex.Matcher compact = Pattern.compile(
+                "^(\\d{1,3})\\s*/\\s*(\\d{1,3})$"
+            ).matcher(part.trim());
+            if (compact.matches()) {
+                int floor = Integer.parseInt(compact.group(1)),
+                    total = Integer.parseInt(compact.group(2));
+                if (floor <= total && total <= 200) {
+                    Json.put(r, "floor", floor);
+                    Json.put(r, "floorsTotal", total);
+                }
+                continue;
+            }
+            compact = Pattern.compile("(?iu)^(\\d{1,3})\\s*(?:эт\\.|пов\\.)$").matcher(part.trim());
+            if (compact.matches()) {
+                Json.put(r, "floor", Integer.parseInt(compact.group(1)));
+                continue;
+            }
             Matcher m = Pattern.compile(
-                "^(\\d{1,3})\\s*(?:кімнат(?:а|и)?|комнат(?:а|ы|ная|ные)?)$",
+                "^(\\d{1,3})\\s*(?:[- ]?кімнат(?:а|и|на|ні)?|[- ]?комнат(?:а|ы|ная|ные)?|к)$",
                 Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE
             ).matcher(part.trim());
             if (m.matches()) {
@@ -277,7 +307,7 @@ final class Sources {
 
     static String cityIdentity(String city) {
         String value = Model.normalized(city);
-        return value.equals("запорожье") ? "запоріжжя" : value;
+        return Bilingual.city(value);
     }
 
     static Result parse(String html, String pageUrl, Section s, int page) {
@@ -289,13 +319,23 @@ final class Sources {
                 : s.source.equals("obyava")
                     ? ".js-classifieds-list .single-item"
                     : ".viewTile_object";
+        Pagination.verify(doc, pageUrl, s, page);
         Elements cards = doc.select(selector);
+        List<String> observed = new ArrayList<>();
         LinkedHashMap<String, JSONObject> records = new LinkedHashMap<>();
         Set<String> conflicts = new HashSet<>();
         int count = 0;
         for (Element card : cards) {
             if (!visible(card)) continue;
             count++;
+            for (Element identity : card.select("a[href]")) {
+                String href = identity.absUrl("href");
+                if (
+                    href.matches(
+                        "https://[^/]+/.*(?:realty-prodaja-|sale/view/|-[0-9]{5,}\\.html|id[0-9]+\\.html).*"
+                    )
+                ) observed.add(href);
+            }
             Element link;
             String url,
                 title,
@@ -479,7 +519,11 @@ final class Sources {
             Json.put(
                 r,
                 "description",
-                text(card.selectFirst(".viewTile__description,.catalog-card-description"))
+                text(
+                    card.selectFirst(
+                        ".viewTile__description,.catalog-card-description,.realty-description,.realty-desc,.desc"
+                    )
+                )
             );
             extractGeo(card, r);
             JSONObject old = records.get(url);
@@ -492,26 +536,8 @@ final class Sources {
                 conflicts.add(url);
             } else if (!conflicts.contains(url)) records.put(url, r);
         }
-        boolean end = false;
-        if (s.source.equals("rieltor")) {
-            String total = text(doc.selectFirst("[data-listing-count]"));
-            Matcher m = Pattern.compile("^(\\d[\\d ]*)\\s+оголошен(?:ь|ня)$").matcher(total);
-            if (m.matches()) {
-                int n = Integer.parseInt(m.group(1).replace(" ", ""));
-                end = (int) Math.ceil(n / 20.0) == page && count == n - (page - 1) * 20;
-            }
-        } else if (s.source.equals("domria-web")) end =
-            doc
-                .select(".pager.last-page .page-item.active")
-                .stream()
-                .anyMatch(e -> text(e).equals(String.valueOf(page))) &&
-            doc.select(".pager .next:not(.disabled)").isEmpty();
-        else if (s.source.equals("obyava")) end =
-            !doc.select(".pagination .pagination__item.next.disabled:not(a)").isEmpty() ||
-            (count == 0 &&
-                !doc.select(".classifieds-list-empty").isEmpty() &&
-                text(doc.selectFirst(".classifieds-list-empty")).contains("ничего не найдено"));
-        else {
+        boolean end = Pagination.end(doc, s, page, count);
+        if (s.source.equals("domik")) {
             String counter = text(doc.selectFirst(".pageSearch__text_foundCount"));
             Matcher m = Pattern.compile(".*?(\\d+)\\s+.*").matcher(counter);
             int max = doc
@@ -547,7 +573,7 @@ final class Sources {
         if (count > 0 && records.isEmpty()) throw new IllegalArgumentException(
             "Карточки есть, но город, тип или полная цена не подтверждены"
         );
-        return new Result(new ArrayList<>(records.values()), end, count);
+        return new Result(new ArrayList<>(records.values()), end, count, observed);
     }
 
     static void extractGeo(Element scope, JSONObject r) {
@@ -584,7 +610,8 @@ final class Sources {
 
     static List<JSONObject> structured(String html, String url) {
         Document doc = Jsoup.parse(html, url);
-        List<JSONObject> out = new ArrayList<>();
+        List<JSONObject> out = new ArrayList<>(RiaPage.parse(doc, url));
+        if (!out.isEmpty()) return out;
         for (Element e : doc.select("script[type=application/ld+json]"))
             try {
                 collectLd(new JSONTokener(e.data()).nextValue(), url, out);

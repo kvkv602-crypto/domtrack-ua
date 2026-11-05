@@ -1,9 +1,11 @@
 package ua.domtrack.mobile;
 
 import android.content.Context;
-import android.net.*;
+import android.net.ConnectivityManager;
+import java.net.URI;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.*;
 import java.util.function.*;
 import org.json.*;
 
@@ -13,14 +15,16 @@ final class Scanner {
     private final Context context;
     private final Database db;
     private final Network net = new Network();
+    private final AtomicBoolean cancelled = new AtomicBoolean();
 
     Scanner(Context c, Database d) {
         context = c.getApplicationContext();
         db = d;
     }
 
-    int scan(boolean deep, BooleanSupplier stop, Consumer<String> progress) throws Exception {
-        return scan(deep, stop, progress, null);
+    void cancel() {
+        cancelled.set(true);
+        net.cancel();
     }
 
     static List<Sources.Section> sectionsFor(List<JSONObject> saved, JSONObject requested) {
@@ -32,273 +36,135 @@ final class Scanner {
             if (!search.optBoolean("enabled", true)) continue;
             JSONObject filters = search.optJSONObject("filters");
             if (filters == null) continue;
-            for (Sources.Section section : Sources.sections(
+            for (Sources.Section s : Sources.sections(
                 filters.optString("city"),
                 filters.optString("kind", "both")
             ))
-                if (sections.stream().noneMatch(s -> s.key().equals(section.key()))) sections.add(
-                    section
-                );
+                if (sections.stream().noneMatch(old -> old.key().equals(s.key()))) sections.add(s);
         }
         return sections;
+    }
+
+    int scan(boolean deep, BooleanSupplier stop, Consumer<String> progress) throws Exception {
+        return scan(deep, stop, progress, null);
     }
 
     int scan(boolean deep, BooleanSupplier stop, Consumer<String> progress, JSONObject requested)
         throws Exception {
         if (!BUSY.compareAndSet(false, true)) return 0;
         long started = System.currentTimeMillis();
-        int imported = 0,
-            attempted = 0;
-        JSONArray failures = new JSONArray();
+        AtomicInteger pages = new AtomicInteger(),
+            imported = new AtomicInteger();
+        List<String> failures = Collections.synchronizedList(new ArrayList<>());
+        BooleanSupplier halted = () ->
+            cancelled.get() || stop.getAsBoolean() || Thread.currentThread().isInterrupted();
         try {
             List<Sources.Section> sections = sectionsFor(db.searches(), requested);
-            if (
-                sections.isEmpty() &&
-                db
-                    .listings()
-                    .stream()
-                    .noneMatch(r -> r.optJSONObject("watch") != null)
-            ) return 0;
             try {
                 Fx.get(db, net, Model.date());
             } catch (Exception e) {
-                failures.put("Не удалось получить сегодняшний курс НБУ; исходные цены сохранены");
+                failures.add("Курс НБУ недоступен; исходные цены сохранены");
             }
-            if (
-                deep &&
-                !sections.isEmpty() &&
-                sections
-                    .stream()
-                    .allMatch(s ->
-                        db.state("section:" + s.key(), new JSONObject()).optBoolean("complete")
-                    )
-            ) {
-                for (Sources.Section section : sections) {
-                    JSONObject state = db.state("section:" + section.key(), new JSONObject());
-                    Json.put(state, "complete", false);
-                    Json.put(state, "nextPage", 1);
-                    Json.put(state, "frontNext", true);
-                    db.saveState("section:" + section.key(), state);
-                }
-            }
-            boolean metered = context
-                .getSystemService(ConnectivityManager.class)
-                .isActiveNetworkMetered();
-            JSONObject schedule = db.state("scanSchedule", new JSONObject());
-            int cursor = schedule.optInt("cursor", 0),
-                budget = deep ? Integer.MAX_VALUE : metered ? 2 : 4;
-            long limit = deep ? Long.MAX_VALUE : 55000L;
-            Set<String> failed = new HashSet<>();
-            while (
-                !sections.isEmpty() &&
-                attempted < budget &&
-                !stop.getAsBoolean() &&
-                System.currentTimeMillis() - started < limit
-            ) {
-                Sources.Section section = sections.get(Math.floorMod(cursor++, sections.size()));
-                JSONObject state = db.state("section:" + section.key(), new JSONObject());
-                if (failed.contains(section.key())) {
-                    if (failed.size() == sections.size()) break;
-                    continue;
-                }
-                if (deep && state.optBoolean("complete")) {
-                    if (
-                        sections
-                            .stream()
-                            .allMatch(s ->
-                                db
-                                    .state("section:" + s.key(), new JSONObject())
-                                    .optBoolean("complete")
-                            )
-                    ) break;
-                    continue;
-                }
-                if (state.optLong("retryAfter") > System.currentTimeMillis()) {
-                    failed.add(section.key());
-                    continue;
-                }
-                // Alternate front-page updates and persisted catalog continuation. Every section gets a turn.
-                boolean front = !deep && state.optBoolean("frontNext", true);
-                int page = front ? 1 : state.optInt("nextPage", 1);
-                if (page > 10000) {
-                    failed.add(section.key());
-                    Json.put(
-                        state,
-                        "error",
-                        "Достигнут защитный предел страниц; обход не завершён"
-                    );
-                    db.saveState("section:" + section.key(), state);
-                    continue;
-                }
-                if (progress != null) progress.accept(
-                    section.source +
-                        " · " +
-                        section.city +
-                        " · " +
-                        (section.kind.equals("house") ? "дома" : "квартиры") +
-                        " · страница " +
-                        page
-                );
-                attempted++;
+            if (deep && !sections.isEmpty()) {
+                // Persist one cursor per catalog. An interrupted sweep resumes at its last committed page.
+                if (
+                    sections.stream().allMatch(s -> state(s).optBoolean("complete"))
+                ) for (Sources.Section s : sections)
+                    db.saveState("section:" + s.key(), Json.object("nextPage", 1));
+                Map<String, List<Sources.Section>> hosts = new LinkedHashMap<>();
+                for (Sources.Section s : sections)
+                    hosts
+                        .computeIfAbsent(URI.create(s.base).getHost(), k -> new ArrayList<>())
+                        .add(s);
+                ExecutorService pool = Executors.newFixedThreadPool(Math.min(4, hosts.size()));
                 try {
-                    String url = section.page(page);
-                    if (!net.robotsAllowed(url, db)) throw new IllegalArgumentException(
-                        "robots.txt ограничивает автоматическую загрузку этого раздела"
-                    );
-                    JSONObject cache = db.state("cache:" + Model.hash(url), new JSONObject());
-                    Network.Page response = net.get(
-                        url,
-                        cache.optString("etag"),
-                        cache.optString("modified")
-                    );
-                    if (response.status == 304) {
-                        if (!cache.optBoolean("observed")) throw new IllegalArgumentException(
-                            "Нет исходного наблюдения для ответа 304"
+                    List<Future<?>> tasks = new ArrayList<>();
+                    for (List<Sources.Section> host : hosts.values())
+                        tasks.add(
+                            pool.submit(() -> {
+                                Set<String> failed = new HashSet<>();
+                                while (!halted.getAsBoolean()) {
+                                    boolean work = false;
+                                    for (Sources.Section s : host) {
+                                        if (halted.getAsBoolean()) break;
+                                        if (
+                                            failed.contains(s.key()) ||
+                                            state(s).optBoolean("complete")
+                                        ) continue;
+                                        work = true;
+                                        int page = state(s).optInt("nextPage", 1);
+                                        try {
+                                            if (page > 10000) throw new IllegalArgumentException(
+                                                "Защитный предел страниц; обход не завершён"
+                                            );
+                                            pages.incrementAndGet();
+                                            imported.addAndGet(load(s, page, false));
+                                        } catch (Exception e) {
+                                            failed.add(s.key());
+                                            failure(s, e, failures);
+                                        }
+                                        if (progress != null) progress.accept(
+                                            "Страниц: " +
+                                                pages.get() +
+                                                " · записей: " +
+                                                imported.get() +
+                                                " · " +
+                                                s.source +
+                                                " · " +
+                                                (s.kind.equals("house") ? "дома" : "квартиры") +
+                                                " · стр. " +
+                                                page
+                                        );
+                                    }
+                                    if (!work) break;
+                                }
+                            })
                         );
-                        if (!front) {
-                            Json.put(state, "nextPage", cache.optBoolean("end") ? 1 : page + 1);
-                            Json.put(state, "complete", cache.optBoolean("end"));
-                            Json.put(state, "fingerprint", cache.optString("fingerprint"));
-                        }
-                        Json.put(state, "checkedAt", Model.now());
-                        Json.put(state, "frontNext", !front);
-                        db.saveState("section:" + section.key(), state);
+                    for (Future<?> task : tasks) task.get();
+                } finally {
+                    pool.shutdownNow();
+                }
+            } else if (!deep && !sections.isEmpty()) {
+                boolean metered = context
+                    .getSystemService(ConnectivityManager.class)
+                    .isActiveNetworkMetered();
+                int budget = metered ? 2 : 4,
+                    cursor = db.state("scanSchedule", new JSONObject()).optInt("cursor");
+                Set<String> failed = new HashSet<>();
+                while (
+                    pages.get() < budget &&
+                    !halted.getAsBoolean() &&
+                    System.currentTimeMillis() - started < 55000 &&
+                    failed.size() < sections.size()
+                ) {
+                    Sources.Section s = sections.get(Math.floorMod(cursor++, sections.size()));
+                    JSONObject state = state(s);
+                    if (failed.contains(s.key())) continue;
+                    if (state.optLong("retryAfter") > System.currentTimeMillis()) {
+                        failed.add(s.key());
                         continue;
                     }
-                    Sources.Result result = Sources.parse(
-                        response.body,
-                        response.url,
-                        section,
-                        page
-                    );
-                    if (
-                        page > 1 && state.optString("fingerprint").equals(result.fingerprint)
-                    ) throw new IllegalArgumentException(
-                        "Сайт повторил предыдущую страницу; обход приостановлен"
-                    );
-                    for (JSONObject record : result.records) {
-                        Json.put(record, "catalogUrl", url);
-                        Json.put(record, "catalogPage", page);
-                    }
-                    boolean baseline = cache.optBoolean("observed", false);
-                    imported += db.ingest(result.records, baseline, true);
-                    db.saveState(
-                        "cache:" + Model.hash(url),
-                        Json.object(
-                            "observed",
-                            true,
-                            "etag",
-                            response.etag,
-                            "modified",
-                            response.modified,
-                            "end",
-                            result.end,
-                            "fingerprint",
-                            result.fingerprint
-                        )
-                    );
-                    Json.put(state, "checkedAt", Model.now());
-                    Json.put(state, "lastPage", page);
-                    Json.put(state, "lastCount", result.records.size());
-                    Json.put(state, "error", "");
-                    Json.put(state, "failures", 0);
-                    Json.put(state, "retryAfter", 0);
-                    Json.put(state, "frontNext", !front);
-                    if (!front || (page == 1 && state.optInt("nextPage", 1) == 1)) {
-                        Json.put(state, "nextPage", result.end ? 1 : page + 1);
-                        Json.put(state, "complete", result.end);
-                        Json.put(state, "fingerprint", result.fingerprint);
-                    }
-                    db.saveState("section:" + section.key(), state);
-                    if (!deep && state.optBoolean("complete")) {
-                        Json.put(state, "frontNext", true);
-                        db.saveState("section:" + section.key(), state);
-                    }
-                } catch (Exception e) {
-                    failed.add(section.key());
-                    int n = state.optInt("failures", 0) + 1;
-                    Json.put(state, "error", safe(e));
-                    Json.put(state, "failures", n);
-                    Json.put(
-                        state,
-                        "retryAfter",
-                        System.currentTimeMillis() +
-                            Math.min(21600000L, 900000L * (1L << Math.min(4, n - 1)))
-                    );
-                    db.saveState("section:" + section.key(), state);
-                    failures.put(section.source + ": " + safe(e));
-                }
-                db.saveState("scanSchedule", Json.object("cursor", cursor));
-                if (!stop.getAsBoolean()) Thread.sleep(2000);
-            }
-            // Individually watched structured pages are independent of the PC and catalog order.
-            if (!stop.getAsBoolean() && System.currentTimeMillis() - started < limit) {
-                int checked = 0;
-                List<JSONObject> monitored = db
-                    .listings()
-                    .stream()
-                    .filter(
-                        o ->
-                            o.optJSONObject("watch") != null &&
-                            o.optJSONObject("watch").optBoolean("enabled", true)
-                    )
-                    .toList();
-                int watchCursor = db.state("watchCursor", new JSONObject()).optInt("next", 0);
-                Set<String> seenWatchPages = new HashSet<>();
-                for (int watchIndex = 0; watchIndex < monitored.size(); watchIndex++) {
-                    JSONObject r = monitored.get(
-                        Math.floorMod(watchCursor + watchIndex, monitored.size())
-                    );
-                    if (
-                        checked >= 2 ||
-                        stop.getAsBoolean() ||
-                        System.currentTimeMillis() - started >= limit
-                    ) break;
-                    db.saveState("watchCursor", Json.object("next", watchCursor + watchIndex + 1));
-                    JSONObject watch = r.optJSONObject("watch");
-                    if (watch == null || !watch.optBoolean("enabled", true)) continue;
+                    boolean front = state.optBoolean("frontNext", true);
                     try {
-                        String url = r.optString("catalogUrl", r.optString("url"));
-                        if (!seenWatchPages.add(url)) continue;
-                        checked++;
-                        if (net.robotsAllowed(url, db)) {
-                            Network.Page response = net.get(url);
-                            if (r.optBoolean("structured")) imported += db.ingest(
-                                Sources.structured(response.body, response.url),
-                                false,
-                                true
-                            );
-                            else {
-                                Sources.Section source = Sources.sections(
-                                    r.optString("city"),
-                                    r.optString("kind")
-                                )
-                                    .stream()
-                                    .filter(s -> s.source.equals(r.optString("source")))
-                                    .findFirst()
-                                    .orElseThrow(() ->
-                                        new IllegalArgumentException(
-                                            "Нужен адаптер отдельной страницы"
-                                        )
-                                    );
-                                imported += db.ingest(
-                                    Sources.parse(
-                                        response.body,
-                                        response.url,
-                                        source,
-                                        r.optInt("catalogPage", 1)
-                                    ).records,
-                                    false,
-                                    true
-                                );
-                            }
-                        }
+                        pages.incrementAndGet();
+                        imported.addAndGet(load(s, front ? 1 : state.optInt("nextPage", 1), front));
                     } catch (Exception e) {
-                        failures.put("Наблюдение: " + safe(e));
+                        failed.add(s.key());
+                        failure(s, e, failures);
                     }
+                    db.saveState("scanSchedule", Json.object("cursor", cursor));
                 }
             }
+            if (!halted.getAsBoolean()) checkWatches(
+                halted,
+                failures,
+                imported,
+                deep ? Long.MAX_VALUE : started + 55000
+            );
             Alerts.deliver(context, db);
+            boolean complete =
+                !sections.isEmpty() &&
+                sections.stream().allMatch(s -> state(s).optBoolean("complete"));
             db.saveState(
                 "lastCheck",
                 Json.object(
@@ -307,20 +173,169 @@ final class Scanner {
                     "durationMs",
                     System.currentTimeMillis() - started,
                     "pages",
-                    attempted,
+                    pages.get(),
                     "imported",
-                    imported,
+                    imported.get(),
                     "errors",
-                    failures,
+                    Json.array(failures),
                     "stopped",
-                    stop.getAsBoolean(),
+                    halted.getAsBoolean(),
+                    "complete",
+                    complete,
                     "mode",
                     deep ? "full" : "background"
                 )
             );
-            return imported;
+            return imported.get();
         } finally {
             BUSY.set(false);
+        }
+    }
+
+    private JSONObject state(Sources.Section s) {
+        return db.state("section:" + s.key(), new JSONObject());
+    }
+
+    private void failure(Sources.Section s, Exception e, List<String> failures) {
+        if (cancelled.get()) return;
+        JSONObject state = state(s);
+        int n = state.optInt("failures") + 1;
+        Json.put(state, "error", safe(e));
+        Json.put(state, "failures", n);
+        Json.put(
+            state,
+            "retryAfter",
+            System.currentTimeMillis() + Math.min(21600000L, 900000L * (1L << Math.min(4, n - 1)))
+        );
+        db.saveState("section:" + s.key(), state);
+        failures.add(s.source + ": " + safe(e));
+    }
+
+    private int load(Sources.Section section, int page, boolean front) throws Exception {
+        String url = section.page(page);
+        if (cancelled.get()) throw new InterruptedException();
+        if (!net.robotsAllowed(url, db)) throw new IllegalArgumentException(
+            "robots.txt ограничивает загрузку раздела"
+        );
+        JSONObject state = state(section),
+            cache = db.state("cache:" + Model.hash(url), new JSONObject());
+        Network.Page response = net.get(url, cache.optString("etag"), cache.optString("modified"));
+        int count = 0;
+        boolean end;
+        String fingerprint;
+        if (response.status == 304) {
+            if (!cache.optBoolean("observed")) throw new IllegalArgumentException(
+                "Нет исходного наблюдения для ответа 304"
+            );
+            end = cache.optBoolean("end");
+            fingerprint = cache.optString("fingerprint");
+        } else {
+            Sources.Result result = Sources.parse(response.body, response.url, section, page);
+            if (
+                page > 1 &&
+                !result.fingerprint.isBlank() &&
+                state.optString("fingerprint").equals(result.fingerprint)
+            ) throw new IllegalArgumentException(
+                "Сайт повторил предыдущую страницу; обход приостановлен"
+            );
+            for (JSONObject r : result.records) {
+                Json.put(r, "catalogUrl", url);
+                Json.put(r, "catalogPage", page);
+            }
+            count = db.ingest(result.records, cache.optBoolean("observed"), true);
+            end = result.end;
+            fingerprint = result.fingerprint;
+            db.saveState(
+                "cache:" + Model.hash(url),
+                Json.object(
+                    "observed",
+                    true,
+                    "etag",
+                    response.etag,
+                    "modified",
+                    response.modified,
+                    "end",
+                    end,
+                    "fingerprint",
+                    fingerprint
+                )
+            );
+            Json.put(state, "lastCount", result.records.size());
+        }
+        Json.put(state, "checkedAt", Model.now());
+        Json.put(state, "lastPage", page);
+        Json.put(state, "error", "");
+        Json.put(state, "failures", 0);
+        Json.put(state, "retryAfter", 0);
+        Json.put(state, "frontNext", !front);
+        if (!front || state.optInt("nextPage", 1) == 1) {
+            Json.put(state, "nextPage", end ? 1 : page + 1);
+            Json.put(state, "complete", end);
+            Json.put(state, "fingerprint", fingerprint);
+        }
+        db.saveState("section:" + section.key(), state);
+        return count;
+    }
+
+    private void checkWatches(
+        BooleanSupplier stop,
+        List<String> failures,
+        AtomicInteger imported,
+        long until
+    ) {
+        List<JSONObject> rows = db
+            .listings()
+            .stream()
+            .filter(
+                r ->
+                    r.optJSONObject("watch") != null &&
+                    r.optJSONObject("watch").optBoolean("enabled", true)
+            )
+            .toList();
+        int cursor = db.state("watchCursor", new JSONObject()).optInt("next"),
+            checked = 0;
+        Set<String> seen = new HashSet<>();
+        for (
+            int i = 0;
+            i < rows.size() &&
+            checked < 2 &&
+            !stop.getAsBoolean() &&
+            System.currentTimeMillis() < until;
+            i++
+        ) {
+            JSONObject r = rows.get(Math.floorMod(cursor + i, rows.size()));
+            db.saveState("watchCursor", Json.object("next", cursor + i + 1));
+            try {
+                String url = r.optString("catalogUrl", r.optString("url"));
+                if (!seen.add(url)) continue;
+                checked++;
+                if (!net.robotsAllowed(url, db)) continue;
+                Network.Page response = net.get(url);
+                if (r.optBoolean("structured")) imported.addAndGet(
+                    db.ingest(Sources.structured(response.body, response.url), false, true)
+                );
+                else {
+                    Sources.Section s = Sources.sections(r.optString("city"), r.optString("kind"))
+                        .stream()
+                        .filter(x -> x.source.equals(r.optString("source")))
+                        .findFirst()
+                        .orElseThrow();
+                    imported.addAndGet(
+                        db.ingest(
+                            Sources.parse(
+                                response.body,
+                                response.url,
+                                s,
+                                r.optInt("catalogPage", 1)
+                            ).records,
+                            false,
+                            true
+                        )
+                    );
+                }
+            } catch (Exception e) {
+                failures.add("Наблюдение: " + safe(e));
+            }
         }
     }
 

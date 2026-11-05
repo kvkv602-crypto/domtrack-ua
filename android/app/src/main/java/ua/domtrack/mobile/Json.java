@@ -40,9 +40,9 @@ final class Json {
         return r;
     }
 
-    static JSONArray array(Collection<JSONObject> list) {
+    static JSONArray array(Collection<?> list) {
         JSONArray a = new JSONArray();
-        for (JSONObject o : list) a.put(o);
+        for (Object o : list) a.put(o);
         return a;
     }
 

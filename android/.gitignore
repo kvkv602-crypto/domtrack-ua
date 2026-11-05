@@ -4,3 +4,8 @@ local.properties
 *.jks
 *.keystore
 private/
+
+app/src/main/assets/ai/*.onnx
+app/src/main/assets/ai/*.model
+app/src/main/assets/ai/tokenizer.json
+app/src/androidTest/assets/tokenizer-golden.json

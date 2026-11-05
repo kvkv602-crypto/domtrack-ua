@@ -9,7 +9,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -23,11 +23,16 @@ jobs:
           curl --fail --location --retry 3 https://services.gradle.org/distributions/gradle-8.13-bin.zip -o "$RUNNER_TEMP/gradle.zip"
           echo "20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78  $RUNNER_TEMP/gradle.zip" | sha256sum --check
           unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
+      - name: Pinned local AI and native tokenizer
+        run: |
+          python3 -m pip install --disable-pip-version-check tokenizers==0.22.1
+          python3 android/ci/prepare-ai.py
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;27.2.12479018" "cmake;3.22.1" > "$RUNNER_TEMP/native-sdk.log" 2>&1
       - name: Unit tests, APK and Android lint
         shell: bash
         run: |
           set +e
-          "$RUNNER_TEMP/gradle-8.13/bin/gradle" --no-daemon --console=plain --stacktrace -p android testDebugUnitTest assembleDebug lintDebug 2>&1 | tee "$RUNNER_TEMP/android-build.log"
+          "$RUNNER_TEMP/gradle-8.13/bin/gradle" --no-daemon --console=plain --stacktrace -p android testDebugUnitTest assembleDebug assembleDebugAndroidTest lintDebug 2>&1 | tee "$RUNNER_TEMP/android-build.log"
           build_status=${PIPESTATUS[0]}
           set -e
           if [ "$build_status" -ne 0 ]; then

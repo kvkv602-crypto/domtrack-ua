@@ -10,7 +10,7 @@ import okhttp3.*;
 final class Network {
 
     static final int MAX_BYTES = 4 * 1024 * 1024;
-    static final String AGENT = "DomTrackUA/0.1 Android (personal property monitor)";
+    static final String AGENT = "DomTrackUA/0.2 Android (personal property monitor)";
     private final OkHttpClient client = new OkHttpClient.Builder()
         .dns(host -> {
             List<InetAddress> addresses = Arrays.asList(InetAddress.getAllByName(host));
@@ -85,7 +85,34 @@ final class Network {
         }
     }
 
+    private static final java.util.concurrent.ConcurrentHashMap<String, Object> HOST_LOCKS =
+        new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.concurrent.ConcurrentHashMap<String, Long> NEXT_REQUEST =
+        new java.util.concurrent.ConcurrentHashMap<>();
+
+    void cancel() {
+        client.dispatcher().cancelAll();
+    }
+
     Page get(String value, String etag, String modified) throws IOException {
+        String host = safe(value).host();
+        synchronized (HOST_LOCKS.computeIfAbsent(host, k -> new Object())) {
+            long delay = NEXT_REQUEST.getOrDefault(host, 0L) - System.currentTimeMillis();
+            if (delay > 0) try {
+                Thread.sleep(delay);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Загрузка остановлена");
+            }
+            try {
+                return fetch(value, etag, modified);
+            } finally {
+                NEXT_REQUEST.put(host, System.currentTimeMillis() + 2000);
+            }
+        }
+    }
+
+    private Page fetch(String value, String etag, String modified) throws IOException {
         HttpUrl url = safe(value);
         for (int redirect = 0; redirect < 4; redirect++) {
             Request.Builder b = new Request.Builder()

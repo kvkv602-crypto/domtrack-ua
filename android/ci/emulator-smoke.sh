@@ -38,6 +38,8 @@ adb shell settings put global window_animation_scale 0
 adb shell settings put global transition_animation_scale 0
 adb shell settings put global animator_duration_scale 0
 adb install android/app/build/outputs/apk/debug/app-debug.apk
+adb install android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
+adb shell pm grant ua.domtrack.mobile android.permission.POST_NOTIFICATIONS
 adb logcat -c
 adb shell am start -W -n ua.domtrack.mobile/.MainActivity > "$result_dir/startup.txt"
 sleep 5
@@ -77,24 +79,19 @@ try:
     for label, name in [('Избранное','03-favorites'),('События','04-events'),('Ещё','05-more'),('Поиск','06-search-again')]:
         tap(label)
         capture(name)
-    adb('shell', 'pm', 'grant', 'ua.domtrack.mobile', 'android.permission.POST_NOTIFICATIONS')
-    tap('Проверить')
-    deadline = time.monotonic() + 120
-    visible_count = 0
-    # Do not save screenshots/XML containing actual advertisements or contacts.
-    while time.monotonic() < deadline:
-        time.sleep(3)
-        adb('shell', 'uiautomator', 'dump', '/sdcard/domtrack-live.xml')
-        live = ET.fromstring(adb('exec-out', 'cat', '/sdcard/domtrack-live.xml'))
-        labels = [node.get('text','') for node in live.iter('node')]
-        if any(label.startswith('Проверка завершена') or label.startswith('Проверка прервана') for label in labels):
-            for label in labels:
-                match = re.search(r'Найдено в локальной базе: (\d+)', label)
-                if match:
-                    visible_count = int(match.group(1))
-            break
-    else:
-        raise AssertionError('Bounded manual search did not complete within 120 seconds')
+    # Test output contains synthetic tokenizer text and aggregate counts only.
+    result = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.DeviceUpgradeTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=360)
+    output = result.stdout.decode(errors='replace') + result.stderr.decode(errors='replace')
+    (out / 'INSTRUMENTATION.txt').write_text(output)
+    if result.returncode != 0 or 'FAILURES!!!' in output or 'INSTRUMENTATION_FAILED' in output or 'OK (' not in output:
+        raise AssertionError('Device tests failed: ' + output[-10000:])
+    (out / '07-native-map.png').write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/map-native.png'))
+    # Reopen the Activity after the test switched off the screen; ensure cached EUR results are visible.
+    adb('shell','am','start','-W','-n','ua.domtrack.mobile/.MainActivity')
+    time.sleep(3)
+    adb('shell','uiautomator','dump','/sdcard/domtrack-live.xml')
+    live = ET.fromstring(adb('exec-out','cat','/sdcard/domtrack-live.xml'))
+    visible_count = max([int(m.group(1)) for n in live.iter('node') if (m := re.search(r'Найдено в локальной базе: (\d+)',n.get('text','')))], default=0)
     adb('shell', 'pidof', 'ua.domtrack.mobile')
     crashes = adb('logcat', '-b', 'crash', '-d').decode(errors='replace')
     (out / 'crashes.txt').write_text(crashes)
@@ -113,13 +110,18 @@ try:
         records = [json.loads(row[0]) for row in db.execute('SELECT data FROM listing')]
         row = db.execute("SELECT data FROM state WHERE name='lastCheck'").fetchone()
         last = json.loads(row[0]) if row else {}
+        extra = {}
+        for name in ['aiDeviceTest','screenOffTest']:
+            row = db.execute('SELECT data FROM state WHERE name=?',(name,)).fetchone()
+            extra[name] = json.loads(row[0]) if row else {}
+    (out / 'DEVICE-CHECKS.json').write_text(json.dumps(extra,indent=2))
     live_result = {'rows': len(records), 'visibleWithEmptyEurBudget': visible_count,
                    'sources': dict(collections.Counter(r.get('source','unknown') for r in records)),
                    'pages': last.get('pages'), 'errors': last.get('errors', [])}
     (out / 'LIVE-SEARCH.json').write_text(json.dumps(live_result, ensure_ascii=False, indent=2))
     if not records or visible_count < 1:
         raise AssertionError('Live search returned no visible listings: ' + json.dumps(live_result, ensure_ascii=False))
-    (out / 'RESULT.txt').write_text('PASS: Android 16 cold start, filter dialog, four native tabs, live manual search with EUR and empty budget, no process crash. No physical Samsung/battery test.\n')
+    (out / 'RESULT.txt').write_text('PASS: Android 16 cold start, native navigation, real multilingual neural inference and official tokenizer parity, SQLite migration, public RIA example, full search advances beyond four pages while screen off, stop and persistent cursors. No physical Samsung/battery test.\n')
     print('Android 16 native startup, navigation and live search: PASS')
 except Exception as error:
     message = str(error).replace('%','%25').replace('\r','%0D').replace('\n','%0A')

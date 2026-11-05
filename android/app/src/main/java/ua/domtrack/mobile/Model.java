@@ -106,14 +106,29 @@ final class Model {
         if (f.optBoolean("favorite") && !r.optBoolean("favorite")) return false;
         String city = f.optString("city");
         if (
-            !city.isBlank() && !normalized(city).equals(normalized(r.optString("city")))
+            !city.isBlank() && !Bilingual.city(city).equals(Bilingual.city(r.optString("city")))
         ) return false;
         String kind = f.optString("kind", "both");
         if (!kind.equals("both") && !kind.equals(r.optString("kind"))) return false;
         String district = normalized(f.optString("district"));
         if (
             !district.isEmpty() &&
-            !normalized(r.optString("district") + " " + r.optString("address")).contains(district)
+            !Bilingual.contains(r.optString("district") + " " + r.optString("address"), district)
+        ) return false;
+        if (
+            !f.optString("query").isBlank() &&
+            !Bilingual.contains(
+                r.optString("city") +
+                    " " +
+                    r.optString("district") +
+                    " " +
+                    r.optString("address") +
+                    " " +
+                    r.optString("title") +
+                    " " +
+                    r.optString("description"),
+                f.optString("query")
+            )
         ) return false;
         String seller = f.optString("sellerType", "any");
         if (

@@ -9,11 +9,16 @@ import org.json.*;
 final class Database extends SQLiteOpenHelper {
 
     Database(Context c) {
-        super(c, "domtrack.db", null, 1);
+        this(c, "domtrack.db");
+    }
+
+    Database(Context c, String name) {
+        super(c, name, null, 2);
         setWriteAheadLoggingEnabled(true);
     }
 
     public void onCreate(SQLiteDatabase db) {
+        embeddingsTable(db);
         db.execSQL(
             "CREATE TABLE listing (id TEXT PRIMARY KEY, data TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1)"
         );
@@ -28,7 +33,48 @@ final class Database extends SQLiteOpenHelper {
     }
 
     public void onUpgrade(SQLiteDatabase db, int old, int next) {
-        throw new IllegalStateException("Неподдерживаемая версия базы");
+        if (old < 2) embeddingsTable(db);
+    }
+
+    private void embeddingsTable(SQLiteDatabase db) {
+        db.execSQL(
+            "CREATE TABLE IF NOT EXISTS embedding (key TEXT PRIMARY KEY, vector BLOB NOT NULL)"
+        );
+    }
+
+    synchronized float[] embedding(String key) {
+        try (
+            Cursor cursor = getReadableDatabase().rawQuery(
+                "SELECT vector FROM embedding WHERE key=?",
+                new String[] { key }
+            )
+        ) {
+            if (!cursor.moveToFirst()) return null;
+            byte[] bytes = cursor.getBlob(0);
+            if (bytes.length != 384 * 4) return null;
+            java.nio.FloatBuffer buffer = java.nio.ByteBuffer.wrap(bytes)
+                .order(java.nio.ByteOrder.LITTLE_ENDIAN)
+                .asFloatBuffer();
+            float[] out = new float[384];
+            buffer.get(out);
+            return out;
+        }
+    }
+
+    synchronized void saveEmbedding(String key, float[] vector) {
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(vector.length * 4).order(
+            java.nio.ByteOrder.LITTLE_ENDIAN
+        );
+        for (float f : vector) buffer.putFloat(f);
+        ContentValues values = new ContentValues();
+        values.put("key", key);
+        values.put("vector", buffer.array());
+        getWritableDatabase().insertWithOnConflict(
+            "embedding",
+            null,
+            values,
+            SQLiteDatabase.CONFLICT_REPLACE
+        );
     }
 
     synchronized JSONObject state(String name, JSONObject fallback) {

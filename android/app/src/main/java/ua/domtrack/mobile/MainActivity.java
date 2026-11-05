@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        handler.post(searchRefresh);
         Alerts.deliver(this, db);
         render();
     }
@@ -71,11 +72,11 @@ public class MainActivity extends Activity {
     protected void onPause() {
         super.onPause();
         resumed = false;
+        handler.removeCallbacks(searchRefresh);
     }
 
     protected void onStop() {
         super.onStop();
-        stopped.set(true);
     }
 
     protected void onDestroy() {
@@ -83,6 +84,26 @@ public class MainActivity extends Activity {
         io.shutdownNow();
         super.onDestroy();
     }
+
+    private boolean searchWasRunning;
+    private long lastSearchRender;
+    private final Runnable searchRefresh = new Runnable() {
+        public void run() {
+            if (!resumed) return;
+            boolean running = SearchService.RUNNING.get();
+            JSONObject search = db.state("activeSearch", new JSONObject());
+            if (running || searchWasRunning) status.setText(search.optString("message", "Поиск…"));
+            if (
+                running != searchWasRunning ||
+                (running && System.currentTimeMillis() - lastSearchRender > 7000)
+            ) {
+                lastSearchRender = System.currentTimeMillis();
+                render();
+            }
+            searchWasRunning = running;
+            handler.postDelayed(this, 1500);
+        }
+    };
 
     private void handleIntent(Intent intent) {
         if (Intent.ACTION_SEND.equals(intent.getAction())) {
@@ -268,14 +289,14 @@ public class MainActivity extends Activity {
         if (!favorites) {
             LinearLayout scan = row();
             scan.addView(
-                button(Scanner.BUSY.get() ? "Остановить" : "Проверить", () -> {
-                    if (Scanner.BUSY.get()) stopped.set(true);
-                    else startScan(false);
+                button(SearchService.RUNNING.get() ? "Остановить" : "Поиск", () -> {
+                    if (SearchService.RUNNING.get()) SearchService.stop(this);
+                    else startScan(true);
                 }),
                 new LinearLayout.LayoutParams(0, -2, 1)
             );
             scan.addView(
-                button("Полный обход", () -> startScan(true)),
+                button("Источники и прогресс", this::sourceStatus),
                 new LinearLayout.LayoutParams(0, -2, 1)
             );
             body.addView(scan);
@@ -286,7 +307,12 @@ public class MainActivity extends Activity {
         if (favorites) Json.put(f, "favorite", true);
         for (JSONObject r : db.listings())
             if (!r.optBoolean("hidden") && Model.matches(r, f, quote())) rows.add(r);
-        rows = Dedupe.collapsed(rows, quote(), filters.optString("currency", "EUR"));
+        rows = SemanticIndex.display(
+            rows,
+            quote(),
+            filters.optString("currency", "EUR"),
+            db.state("duplicateIndex", new JSONObject())
+        );
         String sort = db.state("ui", new JSONObject()).optString("sort", "price");
         if (sort.equals("price")) rows.sort(
             Comparator.comparingDouble(r -> {
@@ -321,6 +347,18 @@ public class MainActivity extends Activity {
             box.addView(p);
             box.addView(text(r.optString("title"), 17, INK));
             box.addView(text(spec(r), 13, MUTED));
+            if (r.has("probableAlternatives")) {
+                box.addView(
+                    text(
+                        "Вероятно один объект · " +
+                            r.optJSONArray("probableAlternatives").length() +
+                            " предложений · минимальная сравнимая цена",
+                        12,
+                        MUTED
+                    )
+                );
+                addButton(box, "Все предложения и сравнение", () -> probableGroup(r));
+            }
             if (r.has("confirmedAlternatives")) box.addView(
                 text(
                     "Подтверждённый объект · предложений: " +
@@ -467,8 +505,14 @@ public class MainActivity extends Activity {
         );
         EditText district = input(
             form,
-            "Район или адрес содержит",
+            "Район / адрес — русский или українська",
             filters.optString("district"),
+            false
+        );
+        EditText query = input(
+            form,
+            "Слова в объявлении — RU / UA",
+            filters.optString("query"),
             false
         );
         Spinner currency = select(
@@ -554,6 +598,7 @@ public class MainActivity extends Activity {
                             seller.getSelectedItemPosition()
                         )
                     );
+                    Json.put(f, "query", query.getText().toString().trim());
                     for (Map.Entry<String, EditText> entry : fields.entrySet()) {
                         String s = entry.getValue().getText().toString().trim().replace(',', '.');
                         if (s.isEmpty()) continue;
@@ -576,7 +621,12 @@ public class MainActivity extends Activity {
                             f.has(k + "Max") &&
                             f.optDouble(k + "Min") > f.optDouble(k + "Max")
                         ) throw new IllegalArgumentException("Значение «от» больше «до»");
-                    if (filters.has("polygon")) Json.put(f, "polygon", filters.opt("polygon"));
+                    if (
+                        Bilingual.city(filters.optString("city")).equals(
+                            Bilingual.city(f.optString("city"))
+                        ) &&
+                        filters.has("polygon")
+                    ) Json.put(f, "polygon", filters.opt("polygon"));
                     filters = f;
                     db.saveState("currentFilters", f);
                     visibleCount = 30;
@@ -610,45 +660,27 @@ public class MainActivity extends Activity {
     }
 
     private void startScan(boolean full) {
-        if (Scanner.BUSY.get()) {
-            toast("Проверка уже выполняется");
+        if (SearchService.RUNNING.get()) {
+            toast("Поиск уже выполняется");
             return;
         }
-        if (db.searches().isEmpty()) {
-            db.saveSearch(
-                Json.object(
-                    "name",
-                    filters.optString("city"),
-                    "enabled",
-                    true,
-                    "filters",
-                    Json.copy(filters)
-                )
-            );
-            requestNotifications();
+        if (db.searches().isEmpty()) db.saveSearch(
+            Json.object(
+                "name",
+                filters.optString("city"),
+                "enabled",
+                true,
+                "filters",
+                Json.copy(filters)
+            )
+        );
+        requestNotifications();
+        try {
+            SearchService.start(this, Json.copy(filters));
+            status.setText("Полный поиск · можно выключить экран");
+        } catch (Exception e) {
+            toast("Поиск не запущен: " + Scanner.safe(e));
         }
-        stopped.set(false);
-        JSONObject requestedFilters = Json.copy(filters);
-        status.setText("Подготовка самостоятельного поиска…");
-        io.execute(() -> {
-            try {
-                int n = new Scanner(this, db).scan(
-                    full,
-                    stopped::get,
-                    message -> handler.post(() -> status.setText(message)),
-                    requestedFilters
-                );
-                handler.post(() -> {
-                    status.setText("Проверка завершена · обработано записей: " + n);
-                    render();
-                });
-            } catch (Exception e) {
-                handler.post(() -> {
-                    status.setText("Проверка прервана: " + Scanner.safe(e));
-                    render();
-                });
-            }
-        });
     }
 
     private void requestNotifications() {
@@ -943,6 +975,19 @@ public class MainActivity extends Activity {
         addButton(body, "Добавить объект вручную", this::manual);
         addButton(body, "Источники и ход обхода", this::sourceStatus);
         addButton(body, "Проверить вероятные дубли", this::duplicateCandidates);
+        body.addView(
+            text(
+                db
+                    .state("aiStatus", new JSONObject())
+                    .optString("message", "Многоязычный ИИ: анализ после полного поиска"),
+                13,
+                MUTED
+            )
+        );
+        addButton(body, "Повторить анализ ИИ", () -> {
+            SemanticIndex.request(this, db);
+            toast("Анализ ИИ запущен на телефоне");
+        });
         addButton(body, "Фон, уведомления и экономия заряда", this::settings);
         addButton(body, "API-ключ DIM.RIA", this::keyDialog);
         addButton(body, "Обновить официальный курс НБУ", () ->
@@ -1014,11 +1059,12 @@ public class MainActivity extends Activity {
         );
         form.addView(
             text(
-                "Android может сдвигать время запуска. Короткая проверка обрабатывает 2 страницы по мобильной сети или 4 по Wi-Fi, затем сохраняет очередь. Полный обход продолжается при открытом приложении. Расход батареи зависит от числа поисков и ответа сайтов.",
+                "Android может сдвигать время запуска. Короткая проверка обрабатывает 2 страницы по мобильной сети или 4 по Wi-Fi, затем сохраняет очередь. Кнопка «Поиск» обходит все доступные страницы подключённых разделов и продолжает работу с выключенным экраном. Прогресс виден в уведомлении; остановка сохраняет очередь. Расход батареи зависит от числа поисков и ответа сайтов.",
                 13,
                 MUTED
             )
         );
+        toggle(form, "Локальный ИИ для русских и украинских описаний", settings, "localAi", true);
         dialog("Автоматическая работа", form).show();
     }
 
@@ -1179,96 +1225,10 @@ public class MainActivity extends Activity {
     }
 
     private void map() {
-        try {
-            LinearLayout content = column();
-            content.addView(
-                text(
-                    "Точки показывают координаты источников; точность может быть неизвестна. Включи рисование и нажимай на карту, чтобы задать границу.",
-                    13,
-                    MUTED
-                )
-            );
-            WebView web = new WebView(this);
-            web.getSettings().setJavaScriptEnabled(true);
-            web.getSettings().setAllowFileAccess(false);
-            web.getSettings().setAllowContentAccess(false);
-            web.getSettings().setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-            web.getSettings().setUserAgentString(Network.AGENT);
-            web.setWebViewClient(
-                new WebViewClient() {
-                    public boolean shouldOverrideUrlLoading(WebView v, WebResourceRequest r) {
-                        return true;
-                    }
-                }
-            );
-            String html = asset("map.html")
-                .replace("/*LEAFLET_CSS*/", asset("leaflet.css"))
-                .replace("/*LEAFLET_JS*/", asset("leaflet.js"));
-            JSONArray points = new JSONArray();
-            for (JSONObject r : db.listings())
-                if (
-                    Model.matches(r, filters, quote()) && r.has("latitude") && r.has("longitude")
-                ) points.put(
-                    Json.object(
-                        "lat",
-                        r.optDouble("latitude"),
-                        "lon",
-                        r.optDouble("longitude"),
-                        "title",
-                        r.optString("title"),
-                        "price",
-                        price(r)
-                    )
-                );
-            html = html
-                .replace("/*POINT_DATA*/", points.toString().replace("<", "\\u003c"))
-                .replace(
-                    "/*ZONE_DATA*/",
-                    filters.optJSONArray("polygon") == null
-                        ? "[]"
-                        : filters.optJSONArray("polygon").toString()
-                );
-            web.loadDataWithBaseURL(
-                "https://appassets.androidplatform.net/",
-                html,
-                "text/html",
-                "UTF-8",
-                null
-            );
-            content.addView(web, new LinearLayout.LayoutParams(-1, dp(420)));
-            addButton(content, "Рисовать / закончить границу", () ->
-                web.evaluateJavascript("window.drawing=!window.drawing", null)
-            );
-            addButton(content, "Сохранить территорию фильтра", () ->
-                web.evaluateJavascript("JSON.stringify(window.zone)", value -> {
-                    try {
-                        JSONArray zone = new JSONArray(
-                            new JSONTokener(value).nextValue().toString()
-                        );
-                        if (zone.length() < 3) throw new IllegalArgumentException();
-                        Json.put(filters, "polygon", zone);
-                        db.saveState("currentFilters", filters);
-                        toast(
-                            "Территория сохранена. Объекты без координат не попадут в этот фильтр."
-                        );
-                        render();
-                    } catch (Exception e) {
-                        toast("Нужно минимум 3 точки границы");
-                    }
-                })
-            );
-            addButton(content, "Убрать территорию", () -> {
-                filters.remove("polygon");
-                db.saveState("currentFilters", filters);
-                web.evaluateJavascript("window.zone=[];window.redraw()", null);
-                render();
-            });
-            AlertDialog d = dialog("Карта объектов", content);
-            d.setOnDismissListener(x -> web.destroy());
-            d.show();
-        } catch (Exception e) {
-            toast("Карта недоступна: " + Scanner.safe(e));
-        }
+        startActivityForResult(
+            new Intent(this, MapActivity.class).putExtra("filters", filters.toString()),
+            24
+        );
     }
 
     private String asset(String name) throws IOException {
@@ -1343,6 +1303,14 @@ public class MainActivity extends Activity {
 
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == 24 && result == RESULT_OK && data != null) {
+            filters = Json.obj(data.getStringExtra("filters"));
+            db.saveState("currentFilters", filters);
+            render();
+            String id = data.getStringExtra("listingId");
+            if (id != null) detail(id);
+            return;
+        }
         if (result != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         if (request == 23) {
@@ -1441,6 +1409,56 @@ public class MainActivity extends Activity {
                 toast("Совпадение подтверждено");
             })
             .show();
+    }
+
+    private void probableGroup(JSONObject display) {
+        LinearLayout content = column();
+        List<JSONObject> records = Json.objects(display.optJSONArray("probableAlternatives"));
+        content.addView(
+            text(
+                "ИИ обнаружил сходство описаний и характеристик. Исходные объявления сохранены отдельно.",
+                14,
+                MUTED
+            )
+        );
+        for (JSONObject record : records) {
+            content.addView(
+                text(
+                    price(record) +
+                        " · " +
+                        record.optString("source") +
+                        "\n" +
+                        record.optString("title"),
+                    16,
+                    INK
+                )
+            );
+            addButton(content, "Открыть предложение", () -> detail(record.optString("id")));
+        }
+        addButton(content, "Сравнить и подтвердить", () -> {
+            compare.clear();
+            for (JSONObject record : records) compare.add(record.optString("id"));
+            comparison();
+        });
+        addButton(content, "Показать эти объявления отдельно", () -> {
+            for (int i = 0; i < records.size(); i++) for (
+                int j = i + 1;
+                j < records.size();
+                j++
+            ) db.saveState(
+                "different:" +
+                    SemanticIndex.pairKey(
+                        records.get(i).optString("id"),
+                        records.get(j).optString("id")
+                    ),
+                Json.object("different", true)
+            );
+            db.saveState("duplicateIndex", new JSONObject());
+            SemanticIndex.request(this, db);
+            render();
+            toast("Объявления показаны отдельно");
+        });
+        dialog("Предложения одного объекта?", content).show();
     }
 
     private void duplicateCandidates() {

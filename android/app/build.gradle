@@ -3,7 +3,11 @@ android {
     namespace 'ua.domtrack.mobile'
     compileSdk 36
     buildToolsVersion '36.0.0'
-    defaultConfig { applicationId 'ua.domtrack.mobile'; minSdk 36; targetSdk 36; versionCode 1; versionName '0.1.0'; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
+    ndkVersion '27.2.12479018'
+    externalNativeBuild { cmake { path file('src/main/cpp/CMakeLists.txt'); version '3.22.1' } }
+    androidResources { noCompress 'onnx', 'model' }
+    packaging { jniLibs { pickFirsts += ['**/libc++_shared.so'] } }
+    defaultConfig { applicationId 'ua.domtrack.mobile'; minSdk 36; targetSdk 36; versionCode 2; versionName '0.2.0'; ndk { abiFilters 'arm64-v8a', 'x86_64' }; externalNativeBuild { cmake { cppFlags '-std=c++17' } }; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     buildTypes { release { minifyEnabled false } }
     testOptions { unitTests.returnDefaultValues = true }
@@ -12,6 +16,12 @@ dependencies {
     implementation 'androidx.work:work-runtime:2.10.5'
     implementation 'org.jsoup:jsoup:1.21.2'
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'org.maplibre.gl:android-sdk:13.6.1'
+    implementation 'com.microsoft.onnxruntime:onnxruntime-android:1.31.1'
+    androidTestImplementation 'androidx.test:runner:1.7.0'
+    androidTestImplementation 'androidx.test:rules:1.7.0'
+    androidTestImplementation 'androidx.test.ext:junit:1.3.0'
+    androidTestImplementation 'androidx.test.uiautomator:uiautomator:2.3.0'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'org.json:json:20250517'
 }
