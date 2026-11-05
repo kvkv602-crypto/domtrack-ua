@@ -60,7 +60,17 @@ final class Scanner {
             cancelled.get() || stop.getAsBoolean() || Thread.currentThread().isInterrupted();
         try {
             List<Sources.Section> sections = sectionsFor(db.searches(), requested);
-            if(sections.isEmpty() && db.listings().stream().noneMatch(r->r.optJSONObject("watch")!=null && r.optJSONObject("watch").optBoolean("enabled",true))) return 0;
+            if (
+                sections.isEmpty() &&
+                db
+                    .listings()
+                    .stream()
+                    .noneMatch(
+                        r ->
+                            r.optJSONObject("watch") != null &&
+                            r.optJSONObject("watch").optBoolean("enabled", true)
+                    )
+            ) return 0;
             try {
                 Fx.get(db, net, Model.date());
             } catch (Exception e) {
@@ -77,7 +87,7 @@ final class Scanner {
                     hosts
                         .computeIfAbsent(URI.create(s.base).getHost(), k -> new ArrayList<>())
                         .add(s);
-                ExecutorService pool = Executors.newFixedThreadPool(Math.min(4, hosts.size()));
+                ExecutorService pool = Executors.newFixedThreadPool(hosts.size());
                 try {
                     List<Future<?>> tasks = new ArrayList<>();
                     for (List<Sources.Section> host : hosts.values())

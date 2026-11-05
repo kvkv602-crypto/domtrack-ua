@@ -62,6 +62,31 @@ final class Sources {
         }
     }
 
+    static final String[] LUN_CITIES = {
+        "kyiv",
+        "odesa",
+        "kharkiv",
+        "lviv",
+        "dnipro",
+        "if",
+        "khmelnytskyi",
+        "vinnytsia",
+        "rivne",
+        "uz",
+        "zp",
+        "poltava",
+        "ternopil",
+        "sumy",
+        "chernihiv",
+        "mykolaiv",
+        "chernivtsi",
+        "zhytomyr",
+        "cherkasy",
+        "kr",
+        "volyn",
+        "kherson",
+    };
+
     static List<Section> sections(String city, String kind) {
         List<Section> out = new ArrayList<>();
         String[] row = Arrays.stream(CITIES)
@@ -81,7 +106,47 @@ final class Sources {
                         (k.equals("house") ? "houses-sale/" : "flats-sale/")
                 )
             );
+            int index = Arrays.asList(CITIES).indexOf(row);
+            if (index < LUN_CITIES.length) {
+                out.add(
+                    new Section(
+                        "lun",
+                        city,
+                        row[1],
+                        k,
+                        "https://lun.ua/sale/" +
+                            LUN_CITIES[index] +
+                            "/" +
+                            (k.equals("house") ? "houses" : "flats")
+                    )
+                );
+                out.add(
+                    new Section(
+                        "flatfy",
+                        city,
+                        row[1],
+                        k,
+                        "https://flatfy.ua/uk/продаж-" +
+                            (k.equals("house") ? "будинків" : "квартир") +
+                            "-" +
+                            row[0].toLowerCase(Locale.ROOT)
+                    )
+                );
+            }
             if (Bilingual.city(city).equals("запоріжжя")) {
+                out.add(
+                    new Section(
+                        "olx",
+                        city,
+                        row[1],
+                        k,
+                        "https://www.olx.ua/uk/nedvizhimost/" +
+                            (k.equals("house")
+                                    ? "doma/prodazha-domov/"
+                                    : "kvartiry/prodazha-kvartir/") +
+                            "zaporozhe/"
+                    )
+                );
                 out.add(
                     new Section(
                         "domria-web",
@@ -312,6 +377,13 @@ final class Sources {
 
     static Result parse(String html, String pageUrl, Section s, int page) {
         Document doc = Jsoup.parse(html, pageUrl);
+        if (s.source.equals("lun") || s.source.equals("flatfy")) return AggregatorPages.parse(
+            doc,
+            pageUrl,
+            s,
+            page
+        );
+        if (s.source.equals("olx")) return OlxPage.parse(doc, pageUrl, s, page);
         String selector = s.source.equals("rieltor")
             ? ".catalog-items-container .catalog-card"
             : s.source.equals("domria-web")

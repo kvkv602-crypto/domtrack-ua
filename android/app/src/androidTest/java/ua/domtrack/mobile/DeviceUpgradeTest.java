@@ -267,6 +267,59 @@ public class DeviceUpgradeTest {
         assertFalse("Explicit stop did not terminate the search", SearchService.RUNNING.get());
     }
 
+    @Test
+    public void test06NewCatalogsReadRealPublicPages() throws Exception {
+        Database db = ((DomTrackApp) context().getApplicationContext()).db();
+        Network network = new Network();
+        JSONObject checks = new JSONObject();
+        for (String provider : List.of("flatfy", "lun")) {
+            Sources.Section section = Sources.sections("Запоріжжя", "apartment")
+                .stream()
+                .filter(s -> s.source.equals(provider))
+                .findFirst()
+                .orElseThrow();
+            assertTrue(
+                provider + " first page restricted by robots.txt",
+                network.robotsAllowed(section.base, db)
+            );
+            Network.Page first = network.get(section.base);
+            Sources.Result a = Sources.parse(first.body, first.url, section, 1);
+            assertTrue(provider + " must return public sale cards", a.records.size() > 0);
+            assertTrue(
+                provider + " must provide actual coordinates",
+                a.records.stream().anyMatch(r -> r.has("latitude") && r.has("longitude"))
+            );
+            Json.put(
+                checks,
+                provider,
+                Json.object("firstPageRecords", a.records.size(), "hasCoordinates", true)
+            );
+            if (provider.equals("flatfy")) {
+                assertTrue(
+                    "Flatfy pagination must be permitted",
+                    network.robotsAllowed(section.page(2), db)
+                );
+                Network.Page second = network.get(section.page(2));
+                Sources.Result b = Sources.parse(second.body, second.url, section, 2);
+                assertTrue("Flatfy page 2 must return records", b.records.size() > 0);
+                assertNotEquals(
+                    "Flatfy page 2 must differ from page 1",
+                    a.fingerprint,
+                    b.fingerprint
+                );
+                Json.put(checks.getJSONObject(provider), "secondPageRecords", b.records.size());
+            } else {
+                Json.put(
+                    checks.getJSONObject(provider),
+                    "paginationAllowed",
+                    network.robotsAllowed(section.page(2), db)
+                );
+                assertFalse("LUN first page cannot imply full coverage", a.end);
+            }
+        }
+        db.saveState("newSourcesTest", checks);
+    }
+
     private int pages(Database db) {
         int pages = 0;
         for (Sources.Section s : Sources.sections("Запоріжжя", "apartment"))

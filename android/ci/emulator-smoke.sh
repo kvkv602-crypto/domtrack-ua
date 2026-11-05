@@ -113,7 +113,7 @@ try:
         row = db.execute("SELECT data FROM state WHERE name='lastCheck'").fetchone()
         last = json.loads(row[0]) if row else {}
         extra = {}
-        for name in ['aiDeviceTest','screenOffTest']:
+        for name in ['aiDeviceTest','screenOffTest','newSourcesTest']:
             row = db.execute('SELECT data FROM state WHERE name=?',(name,)).fetchone()
             extra[name] = json.loads(row[0]) if row else {}
     (out / 'DEVICE-CHECKS.json').write_text(json.dumps(extra,indent=2))

@@ -66,7 +66,11 @@ final class Model {
                 (u.getRawPath() == null || u.getRawPath().isEmpty() ? "/" : u.getRawPath()) +
                 (query.isEmpty() ? "" : "?" + String.join("&", query)) +
                 (u.getRawFragment() == null ? "" : "#" + u.getRawFragment());
-            return hash(canonical);
+            // Aggregators can display an older price for the same original URL. Keep independent histories.
+            String provider = r.optString("source");
+            return hash(
+                (List.of("lun", "flatfy").contains(provider) ? provider + "\n" : "") + canonical
+            );
         } catch (Exception e) {
             throw new IllegalArgumentException("Нужна корректная HTTPS-ссылка без логина и пароля");
         }

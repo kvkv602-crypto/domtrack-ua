@@ -21,7 +21,7 @@ public class SearchService extends Service {
     private Database db;
     private volatile Scanner scanner;
     private long lastNotification;
-    private final Handler lifetimeHandler=new Handler(Looper.getMainLooper());
+    private final Handler lifetimeHandler = new Handler(Looper.getMainLooper());
 
     public void onCreate() {
         super.onCreate();

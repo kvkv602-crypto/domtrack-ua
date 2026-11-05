@@ -177,7 +177,10 @@ final class Network {
                 Json.object("body", text, "checkedAt", System.currentTimeMillis())
             );
         }
-        return robots(text, u.encodedPath());
+        return robots(
+            text,
+            u.encodedPath() + (u.encodedQuery() == null ? "" : "?" + u.encodedQuery())
+        );
     }
 
     static boolean robots(String text, String path) {
