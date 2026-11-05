@@ -170,7 +170,7 @@ final class Network {
                 text = get(root + "/robots.txt").body;
             } catch (IOException e) {
                 if (e.getMessage().equals("Сайт ответил HTTP 404")) text = "";
-                else throw new IOException("Не удалось проверить robots.txt");
+                else throw new IOException("Не удалось проверить robots.txt: " + e.getMessage(), e);
             }
             db.saveState(
                 "robots:" + root,
