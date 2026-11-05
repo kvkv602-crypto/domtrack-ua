@@ -87,6 +87,8 @@ try:
         raise AssertionError('Device tests failed: ' + output[-10000:])
     (out / '07-native-map.png').write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/map-native.png'))
     # Reopen the Activity after the test switched off the screen; ensure cached EUR results are visible.
+    adb('shell','input','keyevent','82')
+    adb('shell','wm','dismiss-keyguard')
     adb('shell','am','start','-W','-n','ua.domtrack.mobile/.MainActivity')
     time.sleep(3)
     adb('shell','uiautomator','dump','/sdcard/domtrack-live.xml')

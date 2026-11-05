@@ -11,5 +11,5 @@ set(SPM_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/../../../build/generated/sentencepie
 add_subdirectory("${SPM_SOURCE}" "${CMAKE_CURRENT_BINARY_DIR}/sentencepiece" EXCLUDE_FROM_ALL)
 add_library(domtrack_tokenizer SHARED tokenizer.cpp)
 target_include_directories(domtrack_tokenizer PRIVATE "${SPM_SOURCE}/src")
-target_link_libraries(domtrack_tokenizer sentencepiece-static)
+target_link_libraries(domtrack_tokenizer sentencepiece-static log)
 target_link_options(domtrack_tokenizer PRIVATE "-Wl,-z,max-page-size=16384")

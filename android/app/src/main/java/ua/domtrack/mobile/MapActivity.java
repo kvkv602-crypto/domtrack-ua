@@ -37,7 +37,7 @@ public class MapActivity extends Activity {
                 Database db = ((DomTrackApp) getApplication()).db();
                 JSONObject quote = db.state("fx:" + Model.date(), new JSONObject()),
                     f = Json.copy(filters);
-                f.remove("polygon");
+
                 ArrayList<JSONObject> rows = new ArrayList<>();
                 int missing = 0;
                 for (JSONObject r : db.listings())
@@ -175,7 +175,7 @@ public class MapActivity extends Activity {
         Database db = ((DomTrackApp) getApplication()).db();
         mapQuote = db.state("fx:" + Model.date(), new JSONObject());
         JSONObject noZone = Json.copy(filters);
-        noZone.remove("polygon");
+
         int missing = 0;
         for (JSONObject r : db.listings())
             if (!r.optBoolean("hidden") && Model.matches(r, noZone, mapQuote)) {
@@ -248,7 +248,8 @@ public class MapActivity extends Activity {
 
     private JSONArray polygon() {
         JSONArray out = new JSONArray();
-        for (LatLng p : zone) out.put(new JSONArray(java.util.List.of(p.getLatitude(),p.getLongitude())));
+        for (LatLng p : zone)
+            out.put(new JSONArray(java.util.List.of(p.getLatitude(), p.getLongitude())));
         return out;
     }
 

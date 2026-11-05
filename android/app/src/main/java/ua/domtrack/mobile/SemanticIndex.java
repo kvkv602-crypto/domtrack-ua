@@ -210,16 +210,31 @@ final class SemanticIndex {
         Map<String, JSONObject> byId = new LinkedHashMap<>();
         for (JSONObject r : confirmed) byId.put(r.optString("id"), r);
         Map<String, JSONObject> evidence = new HashMap<>();
+        Map<String, Set<String>> neighbors = new HashMap<>();
+        Map<String, String> hashes = new HashMap<>();
         for (JSONObject pair : Json.objects(index.optJSONArray("pairs"))) {
             JSONObject a = byId.get(pair.optString("a")),
                 b = byId.get(pair.optString("b"));
             if (
                 a != null &&
                 b != null &&
-                key(a).equals(pair.optString("hashA")) &&
-                key(b).equals(pair.optString("hashB"))
-            ) evidence.put(pairKey(a.optString("id"), b.optString("id")), pair);
+                hashes
+                    .computeIfAbsent(a.optString("id"), unused -> key(a))
+                    .equals(pair.optString("hashA")) &&
+                hashes
+                    .computeIfAbsent(b.optString("id"), unused -> key(b))
+                    .equals(pair.optString("hashB"))
+            ) {
+                evidence.put(pairKey(a.optString("id"), b.optString("id")), pair);
+                neighbors
+                    .computeIfAbsent(a.optString("id"), unused -> new TreeSet<>())
+                    .add(b.optString("id"));
+                neighbors
+                    .computeIfAbsent(b.optString("id"), unused -> new TreeSet<>())
+                    .add(a.optString("id"));
+            }
         }
+        if (evidence.isEmpty()) return confirmed;
         List<JSONObject> out = new ArrayList<>();
         Set<String> used = new HashSet<>();
         for (JSONObject a : confirmed) {
@@ -227,7 +242,8 @@ final class SemanticIndex {
             if (!used.add(id)) continue;
             List<JSONObject> group = new ArrayList<>();
             group.add(a);
-            for (JSONObject b : confirmed) {
+            for (String neighbor : neighbors.getOrDefault(id, Collections.emptySet())) {
+                JSONObject b = byId.get(neighbor);
                 if (
                     used.contains(b.optString("id")) || !b.optString("sameGroup").isBlank()
                 ) continue;
