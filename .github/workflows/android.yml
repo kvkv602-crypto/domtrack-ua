@@ -24,7 +24,25 @@ jobs:
           echo "20f1b1176237254a6fc204d8434196fa11a4cfb387567519c61556e8710aed78  $RUNNER_TEMP/gradle.zip" | sha256sum --check
           unzip -q "$RUNNER_TEMP/gradle.zip" -d "$RUNNER_TEMP"
       - name: Unit tests, APK and Android lint
-        run: '"$RUNNER_TEMP/gradle-8.13/bin/gradle" --no-daemon -p android testDebugUnitTest assembleDebug lintDebug'
+        shell: bash
+        run: |
+          set +e
+          "$RUNNER_TEMP/gradle-8.13/bin/gradle" --no-daemon --console=plain --stacktrace -p android testDebugUnitTest assembleDebug lintDebug 2>&1 | tee "$RUNNER_TEMP/android-build.log"
+          build_status=${PIPESTATUS[0]}
+          set -e
+          if [ "$build_status" -ne 0 ]; then
+            python3 - <<'PY'
+          import os
+          from pathlib import Path
+          log = (Path(os.environ['RUNNER_TEMP']) / 'android-build.log').read_text(errors='replace')
+          lines = log.splitlines()
+          start = next((i for i, line in enumerate(lines) if '* What went wrong:' in line), max(0, len(lines) - 100))
+          excerpt = '\n'.join(lines[start:start + 130])[:16000]
+          escaped = excerpt.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+          print('::error title=Android Gradle failure::' + escaped)
+          PY
+          fi
+          exit "$build_status"
       - name: Verify APK signature
         run: |
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose android/app/build/outputs/apk/debug/app-debug.apk
@@ -36,5 +54,7 @@ jobs:
           path: |
             android/app/build/outputs/apk/debug/
             android/app/build/reports/
+            android/app/build/test-results/
+            ${{ runner.temp }}/android-build.log
           if-no-files-found: warn
           retention-days: 14
