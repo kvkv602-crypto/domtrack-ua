@@ -20,28 +20,38 @@ final class Scanner {
     }
 
     int scan(boolean deep, BooleanSupplier stop, Consumer<String> progress) throws Exception {
+        return scan(deep, stop, progress, null);
+    }
+
+    static List<Sources.Section> sectionsFor(List<JSONObject> saved, JSONObject requested) {
+        List<Sources.Section> sections = new ArrayList<>();
+        List<JSONObject> searches = requested == null
+            ? saved
+            : List.of(Json.object("enabled", true, "filters", requested));
+        for (JSONObject search : searches) {
+            if (!search.optBoolean("enabled", true)) continue;
+            JSONObject filters = search.optJSONObject("filters");
+            if (filters == null) continue;
+            for (Sources.Section section : Sources.sections(
+                filters.optString("city"),
+                filters.optString("kind", "both")
+            ))
+                if (sections.stream().noneMatch(s -> s.key().equals(section.key()))) sections.add(
+                    section
+                );
+        }
+        return sections;
+    }
+
+    int scan(boolean deep, BooleanSupplier stop, Consumer<String> progress, JSONObject requested)
+        throws Exception {
         if (!BUSY.compareAndSet(false, true)) return 0;
         long started = System.currentTimeMillis();
         int imported = 0,
             attempted = 0;
         JSONArray failures = new JSONArray();
         try {
-            try {
-                Fx.get(db, net, Model.date());
-            } catch (Exception e) {
-                failures.put("Не удалось получить сегодняшний курс НБУ; исходные цены сохранены");
-            }
-            List<Sources.Section> sections = new ArrayList<>();
-            for (JSONObject search : db.searches()) {
-                if (!search.optBoolean("enabled", true)) continue;
-                JSONObject f = search.optJSONObject("filters");
-                if (f == null) continue;
-                for (Sources.Section s : Sources.sections(
-                    f.optString("city"),
-                    f.optString("kind", "both")
-                ))
-                    if (sections.stream().noneMatch(x -> x.key().equals(s.key()))) sections.add(s);
-            }
+            List<Sources.Section> sections = sectionsFor(db.searches(), requested);
             if (
                 sections.isEmpty() &&
                 db
@@ -49,6 +59,28 @@ final class Scanner {
                     .stream()
                     .noneMatch(r -> r.optJSONObject("watch") != null)
             ) return 0;
+            try {
+                Fx.get(db, net, Model.date());
+            } catch (Exception e) {
+                failures.put("Не удалось получить сегодняшний курс НБУ; исходные цены сохранены");
+            }
+            if (
+                deep &&
+                !sections.isEmpty() &&
+                sections
+                    .stream()
+                    .allMatch(s ->
+                        db.state("section:" + s.key(), new JSONObject()).optBoolean("complete")
+                    )
+            ) {
+                for (Sources.Section section : sections) {
+                    JSONObject state = db.state("section:" + section.key(), new JSONObject());
+                    Json.put(state, "complete", false);
+                    Json.put(state, "nextPage", 1);
+                    Json.put(state, "frontNext", true);
+                    db.saveState("section:" + section.key(), state);
+                }
+            }
             boolean metered = context
                 .getSystemService(ConnectivityManager.class)
                 .isActiveNetworkMetered();

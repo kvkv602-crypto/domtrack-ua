@@ -263,4 +263,33 @@ public class CoreTest {
         Json.put(b, "address", "50 лет Победы, 12");
         assertNotEquals(Dedupe.address(a), Dedupe.address(b));
     }
+
+    @Test
+    public void manualSearchUsesSelectedCityWhileBackgroundUsesSavedSearches() {
+        List<JSONObject> saved = List.of(
+            Json.object(
+                "enabled",
+                true,
+                "filters",
+                Json.object("city", "Запоріжжя", "kind", "both")
+            )
+        );
+        List<Sources.Section> manual = Scanner.sectionsFor(
+            saved,
+            Json.object("city", "Київ", "kind", "house")
+        );
+        assertFalse(manual.isEmpty());
+        assertTrue(manual.stream().allMatch(s -> s.city.equals("Київ") && s.kind.equals("house")));
+        assertTrue(
+            Scanner.sectionsFor(saved, null)
+                .stream()
+                .allMatch(s -> s.city.equals("Запоріжжя"))
+        );
+        assertTrue(
+            Scanner.sectionsFor(
+                List.of(Json.object("enabled", false, "filters", Json.object("city", "Київ"))),
+                null
+            ).isEmpty()
+        );
+    }
 }

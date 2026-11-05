@@ -628,11 +628,15 @@ public class MainActivity extends Activity {
             requestNotifications();
         }
         stopped.set(false);
+        JSONObject requestedFilters = Json.copy(filters);
         status.setText("Подготовка самостоятельного поиска…");
         io.execute(() -> {
             try {
-                int n = new Scanner(this, db).scan(full, stopped::get, message ->
-                    handler.post(() -> status.setText(message))
+                int n = new Scanner(this, db).scan(
+                    full,
+                    stopped::get,
+                    message -> handler.post(() -> status.setText(message)),
+                    requestedFilters
                 );
                 handler.post(() -> {
                     status.setText("Проверка завершена · обработано записей: " + n);
