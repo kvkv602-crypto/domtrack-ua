@@ -292,4 +292,28 @@ public class CoreTest {
             ).isEmpty()
         );
     }
+
+    @Test
+    public void russianObyavaLocalityMatchesUkrainianSearchButNotAnotherCity() {
+        Sources.Section section = Sources.sections("Запоріжжя", "apartment")
+            .stream()
+            .filter(s -> s.source.equals("obyava"))
+            .findFirst()
+            .orElseThrow();
+        String html = """
+            <div class="js-classifieds-list"><div class="single-item">
+              <a class="single-item__title" href="https://obyava.ua/ru/prodam-kvartiru-123456.html">Продам квартиру</a>
+              <div class="single-item__price">800 000 грн</div>
+              <div class="single-item__location">Запорожье</div>
+              <div class="single-item__params">2-комнатная | 50 м² | 4/9</div>
+            </div></div>
+            """;
+        Sources.Result result = Sources.parse(html, section.base, section, 1);
+        assertEquals(1, result.records.size());
+        assertEquals("Запоріжжя", result.records.get(0).optString("city"));
+        assertEquals("UAH", result.records.get(0).optString("currency"));
+        assertThrows(IllegalArgumentException.class, () ->
+            Sources.parse(html.replace("Запорожье", "Вільнянськ"), section.base, section, 1)
+        );
+    }
 }

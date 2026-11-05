@@ -275,6 +275,11 @@ final class Sources {
         }
     }
 
+    static String cityIdentity(String city) {
+        String value = Model.normalized(city);
+        return value.equals("запорожье") ? "запоріжжя" : value;
+    }
+
     static Result parse(String html, String pageUrl, Section s, int page) {
         Document doc = Jsoup.parse(html, pageUrl);
         String selector = s.source.equals("rieltor")
@@ -406,9 +411,10 @@ final class Sources {
             if (
                 url == null ||
                 p == null ||
-                !Model.normalized(city).equals(Model.normalized(s.city)) ||
+                !cityIdentity(city).equals(cityIdentity(s.city)) ||
                 title.isBlank()
             ) continue;
+            city = s.city;
             JSONObject r = Json.object(
                 "url",
                 url,
