@@ -11,6 +11,23 @@ final class Network {
 
     static final int MAX_BYTES = 4 * 1024 * 1024;
     static final String AGENT = "DomTrackUA/0.2 Android (personal property monitor)";
+
+    static final class HttpFailure extends IOException {
+
+        final int status;
+
+        HttpFailure(int code) {
+            super("Сайт ответил HTTP " + code);
+            status = code;
+        }
+    }
+
+    static boolean robotsUnavailable(int status) {
+        // RFC 9309 §2.3.1.3 permits public-resource requests when robots.txt returns 4xx.
+        // A rate limit still pauses requests; server and network failures remain failures.
+        return status >= 400 && status < 500 && status != 429;
+    }
+
     private final OkHttpClient client = new OkHttpClient.Builder()
         .dns(host -> {
             List<InetAddress> addresses = Arrays.asList(InetAddress.getAllByName(host));
@@ -131,7 +148,7 @@ final class Network {
                     url = safe(next.toString());
                     continue;
                 }
-                if (!r.isSuccessful()) throw new IOException("Сайт ответил HTTP " + r.code());
+                if (!r.isSuccessful()) throw new HttpFailure(r.code());
                 if (r.body() == null) throw new IOException("Пустой ответ сайта");
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 try (InputStream in = r.body().byteStream()) {
@@ -169,8 +186,17 @@ final class Network {
             try {
                 text = get(root + "/robots.txt").body;
             } catch (IOException e) {
-                if (e.getMessage().equals("Сайт ответил HTTP 404")) text = "";
-                else throw new IOException("Не удалось проверить robots.txt: " + e.getMessage(), e);
+                if (e instanceof HttpFailure && robotsUnavailable(((HttpFailure) e).status)) {
+                    // Preserve previously fetched restrictions if access to the policy temporarily changes.
+                    if (
+                        ((HttpFailure) e).status == 404 ||
+                        ((HttpFailure) e).status == 410 ||
+                        text.isBlank()
+                    ) text = "";
+                } else throw new IOException(
+                    "Не удалось проверить robots.txt: " + e.getMessage(),
+                    e
+                );
             }
             db.saveState(
                 "robots:" + root,

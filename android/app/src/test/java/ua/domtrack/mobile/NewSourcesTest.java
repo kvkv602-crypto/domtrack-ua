@@ -9,6 +9,17 @@ import org.junit.Test;
 public class NewSourcesTest {
 
     @Test
+    public void unavailableRobotsPolicyDoesNotHidePublicCatalogButRateLimitsAndOutagesStillPause() {
+        assertTrue(Network.robotsUnavailable(403));
+        assertTrue(Network.robotsUnavailable(404));
+        assertTrue(Network.robotsUnavailable(410));
+        assertFalse(Network.robotsUnavailable(429));
+        assertFalse(Network.robotsUnavailable(500));
+        assertFalse(Network.robotsUnavailable(503));
+        assertFalse(Network.robotsUnavailable(0));
+    }
+
+    @Test
     public void repeatingSearchRefreshesFinishedSitesWhileAnotherSiteRemainsPartial() {
         JSONObject finished = Json.object("nextPage", 1, "complete", true),
             partial = Json.object("nextPage", 25, "complete", false, "fingerprint", "saved-cursor");

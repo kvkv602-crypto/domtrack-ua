@@ -307,41 +307,77 @@ public class DeviceUpgradeTest {
 
     @Test
     public void test06NewCatalogsReadRealPublicPages() throws Exception {
-        Database db=((DomTrackApp)context().getApplicationContext()).db();
-        Network network=new Network();JSONObject checks=new JSONObject();
-        for(String provider:List.of("flatfy","lun")) {
-            Sources.Section section=Sources.sections("Запоріжжя","apartment").stream().filter(x->x.source.equals(provider)).findFirst().orElseThrow();
-            JSONObject evidence=Json.object("status","checking");Json.put(checks,provider,evidence);
+        Database db = ((DomTrackApp) context().getApplicationContext()).db();
+        Network network = new Network();
+        JSONObject checks = new JSONObject();
+        for (String provider : List.of("flatfy", "lun")) {
+            Sources.Section section = Sources.sections("Запоріжжя", "apartment")
+                .stream()
+                .filter(x -> x.source.equals(provider))
+                .findFirst()
+                .orElseThrow();
+            JSONObject evidence = Json.object("status", "checking");
+            Json.put(checks, provider, evidence);
             try {
-                if(!network.robotsAllowed(section.base,db)) {
-                    Json.put(evidence,"status","restricted");Json.put(evidence,"error","robots.txt restricts the catalog");continue;
+                if (!network.robotsAllowed(section.base, db)) {
+                    Json.put(evidence, "status", "restricted");
+                    Json.put(evidence, "error", "robots.txt restricts the catalog");
+                    continue;
                 }
-                Network.Page first=network.get(section.base);
-                Sources.Result one=Sources.parse(first.body,first.url,section,1);
-                assertTrue(provider+" must return actual sale cards",one.records.size()>0);
-                assertTrue(provider+" must provide actual coordinates",one.records.stream().anyMatch(r->r.has("latitude")&&r.has("longitude")));
-                Json.put(evidence,"firstPageRecords",one.records.size());Json.put(evidence,"hasCoordinates",true);Json.put(evidence,"status","available");
-                if(provider.equals("flatfy")) {
-                    if(network.robotsAllowed(section.page(2),db)) {
-                        Network.Page second=network.get(section.page(2));Sources.Result two=Sources.parse(second.body,second.url,section,2);
-                        assertTrue(two.records.size()>0);assertNotEquals(one.fingerprint,two.fingerprint);Json.put(evidence,"secondPageRecords",two.records.size());
-                    } else {Json.put(evidence,"status","partial");Json.put(evidence,"error","robots.txt restricts pagination");}
+                Network.Page first = network.get(section.base);
+                Sources.Result one = Sources.parse(first.body, first.url, section, 1);
+                assertTrue(provider + " must return actual sale cards", one.records.size() > 0);
+                assertTrue(
+                    provider + " must provide actual coordinates",
+                    one.records.stream().anyMatch(r -> r.has("latitude") && r.has("longitude"))
+                );
+                Json.put(evidence, "firstPageRecords", one.records.size());
+                Json.put(evidence, "hasCoordinates", true);
+                Json.put(evidence, "status", "available");
+                if (provider.equals("flatfy")) {
+                    if (network.robotsAllowed(section.page(2), db)) {
+                        Network.Page second = network.get(section.page(2));
+                        Sources.Result two = Sources.parse(second.body, second.url, section, 2);
+                        assertTrue(two.records.size() > 0);
+                        assertNotEquals(one.fingerprint, two.fingerprint);
+                        Json.put(evidence, "secondPageRecords", two.records.size());
+                    } else {
+                        Json.put(evidence, "status", "partial");
+                        Json.put(evidence, "error", "robots.txt restricts pagination");
+                    }
                 } else {
-                    boolean allowed=network.robotsAllowed(section.page(2),db);Json.put(evidence,"paginationAllowed",allowed);assertFalse(one.end);
-                    if(!allowed)Json.put(evidence,"status","partial");
+                    boolean allowed = network.robotsAllowed(section.page(2), db);
+                    Json.put(evidence, "paginationAllowed", allowed);
+                    assertFalse(one.end);
+                    if (!allowed) Json.put(evidence, "status", "partial");
                 }
-                Sources.Section house=Sources.sections("Запоріжжя","house").stream().filter(x->x.source.equals(provider)).findFirst().orElseThrow();
-                if(network.robotsAllowed(house.base,db)) {
-                    Network.Page response=network.get(house.base);Sources.Result houses=Sources.parse(response.body,response.url,house,1);
-                    assertTrue(houses.records.size()>0);assertTrue(houses.records.stream().allMatch(r->r.optString("kind").equals("house")));Json.put(evidence,"houseRecords",houses.records.size());
+                Sources.Section house = Sources.sections("Запоріжжя", "house")
+                    .stream()
+                    .filter(x -> x.source.equals(provider))
+                    .findFirst()
+                    .orElseThrow();
+                if (network.robotsAllowed(house.base, db)) {
+                    Network.Page response = network.get(house.base);
+                    Sources.Result houses = Sources.parse(response.body, response.url, house, 1);
+                    assertTrue(houses.records.size() > 0);
+                    assertTrue(
+                        houses.records.stream().allMatch(r -> r.optString("kind").equals("house"))
+                    );
+                    Json.put(evidence, "houseRecords", houses.records.size());
                 }
-            } catch(java.io.IOException unavailable) {
+            } catch (java.io.IOException unavailable) {
                 // Vendor access denial or outage is evidence of limited coverage, never fabricated records.
-                Json.put(evidence,"status",evidence.optInt("firstPageRecords")>0?"partial":"unavailable");
-                Json.put(evidence,"error",Scanner.safe(unavailable));
-            } finally {db.saveState("newSourcesTest",checks);}
+                Json.put(
+                    evidence,
+                    "status",
+                    evidence.optInt("firstPageRecords") > 0 ? "partial" : "unavailable"
+                );
+                Json.put(evidence, "error", Scanner.safe(unavailable));
+            } finally {
+                db.saveState("newSourcesTest", checks);
+            }
         }
-        assertEquals(2,checks.length());
+        assertEquals(2, checks.length());
     }
 
     private int pages(Database db) {
