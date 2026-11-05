@@ -50,17 +50,23 @@ public class MapActivity extends Activity {
                         ) rows.add(r);
                         else missing++;
                     }
+                List<JSONObject> unique = SemanticIndex.display(
+                    rows,
+                    quote,
+                    f.optString("currency", "USD"),
+                    db.state("duplicateIndex", new JSONObject())
+                );
                 final int without = missing;
                 runOnUiThread(() -> {
                     if (!active) return;
                     mapQuote = quote;
                     listings.clear();
-                    listings.addAll(rows);
+                    listings.addAll(unique);
                     labels.clear();
                     for (JSONObject r : listings) labels.put(r.optString("id"), price(r));
                     if (coverage != null) coverage.setText(
                         "Координаты площадок: " +
-                            rows.size() +
+                            unique.size() +
                             " · без координат: " +
                             without +
                             "\n© OpenFreeMap · OpenMapTiles · OpenStreetMap"
@@ -187,6 +193,14 @@ public class MapActivity extends Activity {
                 ) listings.add(r);
                 else missing++;
             }
+        List<JSONObject> unique = SemanticIndex.display(
+            listings,
+            mapQuote,
+            filters.optString("currency", "USD"),
+            db.state("duplicateIndex", new JSONObject())
+        );
+        listings.clear();
+        listings.addAll(unique);
         for (JSONObject r : listings) labels.put(r.optString("id"), price(r));
         final int without = missing;
         view.getMapAsync(m -> {
