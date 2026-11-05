@@ -8,6 +8,17 @@ import org.junit.Test;
 
 public class NewSourcesTest {
 
+    @Test
+    public void repeatingSearchRefreshesFinishedSitesWhileAnotherSiteRemainsPartial() {
+        JSONObject finished = Json.object("nextPage", 1, "complete", true),
+            partial = Json.object("nextPage", 25, "complete", false, "fingerprint", "saved-cursor");
+        assertFalse(Scanner.manualStart(finished).optBoolean("complete"));
+        JSONObject resumed = Scanner.manualStart(partial);
+        assertEquals(25, resumed.optInt("nextPage"));
+        assertEquals("saved-cursor", resumed.optString("fingerprint"));
+        assertTrue(finished.optBoolean("complete"));
+    }
+
     private Sources.Section section(String source) {
         return Sources.sections("Запоріжжя", "apartment")
             .stream()

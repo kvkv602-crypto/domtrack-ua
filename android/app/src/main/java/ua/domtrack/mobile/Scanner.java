@@ -17,6 +17,10 @@ final class Scanner {
     private final Network net = new Network();
     private final AtomicBoolean cancelled = new AtomicBoolean();
 
+    static JSONObject manualStart(JSONObject previous) {
+        return previous.optBoolean("complete") ? Json.object("nextPage", 1) : Json.copy(previous);
+    }
+
     Scanner(Context c, Database d) {
         context = c.getApplicationContext();
         db = d;
@@ -78,10 +82,8 @@ final class Scanner {
             }
             if (deep && !sections.isEmpty()) {
                 // Persist one cursor per catalog. An interrupted sweep resumes at its last committed page.
-                if (
-                    sections.stream().allMatch(s -> state(s).optBoolean("complete"))
-                ) for (Sources.Section s : sections)
-                    db.saveState("section:" + s.key(), Json.object("nextPage", 1));
+                for (Sources.Section s : sections)
+                    db.saveState("section:" + s.key(), manualStart(state(s)));
                 Map<String, List<Sources.Section>> hosts = new LinkedHashMap<>();
                 for (Sources.Section s : sections)
                     hosts
@@ -94,6 +96,7 @@ final class Scanner {
                         tasks.add(
                             pool.submit(() -> {
                                 Set<String> failed = new HashSet<>();
+                                Set<String> frontChecked = new HashSet<>();
                                 while (!halted.getAsBoolean()) {
                                     boolean work = false;
                                     for (Sources.Section s : host) {
@@ -103,13 +106,16 @@ final class Scanner {
                                             state(s).optBoolean("complete")
                                         ) continue;
                                         work = true;
-                                        int page = state(s).optInt("nextPage", 1);
+                                        boolean front =
+                                            frontChecked.add(s.key()) &&
+                                            state(s).optInt("nextPage", 1) > 1;
+                                        int page = front ? 1 : state(s).optInt("nextPage", 1);
                                         try {
                                             if (page > 10000) throw new IllegalArgumentException(
                                                 "Защитный предел страниц; обход не завершён"
                                             );
                                             pages.incrementAndGet();
-                                            imported.addAndGet(load(s, page, false));
+                                            imported.addAndGet(load(s, page, front));
                                         } catch (Exception e) {
                                             failed.add(s.key());
                                             failure(s, e, failures);
