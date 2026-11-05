@@ -123,7 +123,7 @@ public class CoreTest {
     }
 
     @Test
-    public void polygonNeverGuessesMissingLocation() {
+    public void polygonNeverGuessesMissingLocation() throws Exception {
         JSONArray polygon = new JSONArray("[[47,35],[48,35],[48,36],[47,36]]");
         assertTrue(Model.inside(47.5, 35.5, polygon));
         assertFalse(Model.inside(49, 35.5, polygon));
