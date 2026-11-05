@@ -156,6 +156,44 @@ public class DeviceUpgradeTest {
                 Thread.sleep(500);
             }
             assertTrue("Native vector map did not load", ready);
+            java.lang.reflect.Field mapField = MapActivity.class.getDeclaredField("map"),
+                viewField = MapActivity.class.getDeclaredField("view");
+            mapField.setAccessible(true);
+            viewField.setAccessible(true);
+            org.maplibre.android.maps.MapLibreMap nativeMap =
+                (org.maplibre.android.maps.MapLibreMap) mapField.get(activity);
+            org.maplibre.android.maps.MapView nativeView =
+                (org.maplibre.android.maps.MapView) viewField.get(activity);
+            java.util.concurrent.atomic.AtomicInteger rendered =
+                new java.util.concurrent.atomic.AtomicInteger();
+            deadline = System.currentTimeMillis() + 45000;
+            while (rendered.get() < 20 && System.currentTimeMillis() < deadline) {
+                instrumentation.runOnMainSync(() ->
+                    rendered.set(
+                        nativeMap
+                            .queryRenderedFeatures(
+                                new android.graphics.RectF(
+                                    0,
+                                    0,
+                                    nativeView.getWidth(),
+                                    nativeView.getHeight()
+                                ),
+                                (String[]) null
+                            )
+                            .size()
+                    )
+                );
+                Thread.sleep(500);
+            }
+            assertTrue(
+                "Map style loaded but street-map features were not rendered",
+                rendered.get() >= 20
+            );
+            Thread.sleep(1500);
+            db.saveState(
+                "mapDeviceTest",
+                Json.object("renderedFeatures", rendered.get(), "priceMarker", true)
+            );
             assertTrue(device.takeScreenshot(new java.io.File(c.getFilesDir(), "map-native.png")));
             device
                 .findObject(new androidx.test.uiautomator.UiSelector().text("Прямоугольник"))

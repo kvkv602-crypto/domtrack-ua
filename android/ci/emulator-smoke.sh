@@ -9,7 +9,22 @@ export ANDROID_USER_HOME="$RUNNER_TEMP/domtrack-android"
 export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
 mkdir -p "$ANDROID_AVD_HOME"
 
-"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "emulator" "system-images;android-36;google_apis;x86_64" > "$result_dir/sdk-install.log" 2>&1
+# Reuse the runner's working emulator instead of downloading an unrelated update.
+install_sdk() {
+  for attempt in 1 2 3; do
+    if "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "$@" >> "$result_dir/sdk-install.log" 2>&1; then return 0; fi
+    sleep 5
+  done
+  tail -n 35 "$result_dir/sdk-install.log"
+  echo '::error title=Android SDK download::SDK package could not be installed after three attempts'
+  return 1
+}
+if ! "$ANDROID_HOME/emulator/emulator" -version > "$result_dir/emulator-version.txt" 2>&1; then
+  install_sdk "emulator"
+fi
+if [ ! -f "$ANDROID_HOME/system-images/android-36/google_apis/x86_64/package.xml" ]; then
+  install_sdk "system-images;android-36;google_apis;x86_64"
+fi
 if [ -e /dev/kvm ]; then
   sudo chown "$(id -u):$(id -g)" /dev/kvm
 fi
@@ -113,7 +128,7 @@ try:
         row = db.execute("SELECT data FROM state WHERE name='lastCheck'").fetchone()
         last = json.loads(row[0]) if row else {}
         extra = {}
-        for name in ['aiDeviceTest','screenOffTest','newSourcesTest']:
+        for name in ['aiDeviceTest','screenOffTest','newSourcesTest','mapDeviceTest']:
             row = db.execute('SELECT data FROM state WHERE name=?',(name,)).fetchone()
             extra[name] = json.loads(row[0]) if row else {}
     (out / 'DEVICE-CHECKS.json').write_text(json.dumps(extra,indent=2))
