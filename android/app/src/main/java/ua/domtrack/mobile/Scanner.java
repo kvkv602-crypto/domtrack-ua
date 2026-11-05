@@ -306,7 +306,9 @@ final class Scanner {
             JSONObject r = rows.get(Math.floorMod(cursor + i, rows.size()));
             db.saveState("watchCursor", Json.object("next", cursor + i + 1));
             try {
-                String url = r.optString("catalogUrl", r.optString("url"));
+                String url = r.optBoolean("structured")
+                    ? r.optString("url")
+                    : r.optString("catalogUrl", r.optString("url"));
                 if (!seen.add(url)) continue;
                 checked++;
                 if (!net.robotsAllowed(url, db)) continue;
@@ -336,6 +338,23 @@ final class Scanner {
             } catch (Exception e) {
                 failures.add("Наблюдение: " + safe(e));
             }
+        }
+    }
+
+    int coordinates(JSONObject filters, BooleanSupplier stop, Consumer<String> progress)
+        throws Exception {
+        if (!BUSY.compareAndSet(false, true)) return 0;
+        try {
+            return Coordinates.load(
+                context,
+                db,
+                net,
+                filters,
+                () -> cancelled.get() || stop.getAsBoolean(),
+                progress
+            );
+        } finally {
+            BUSY.set(false);
         }
     }
 

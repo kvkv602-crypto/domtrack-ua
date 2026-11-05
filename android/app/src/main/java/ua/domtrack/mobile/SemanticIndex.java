@@ -91,8 +91,11 @@ final class SemanticIndex {
         build(context, db, () -> false);
     }
 
-    static void build(Context context, Database db, java.util.function.BooleanSupplier stop)
-        throws Exception {
+    static synchronized void build(
+        Context context,
+        Database db,
+        java.util.function.BooleanSupplier stop
+    ) throws Exception {
         Map<String, List<JSONObject>> buckets = new LinkedHashMap<>();
         for (JSONObject r : db.listings()) {
             String key = bucket(r);

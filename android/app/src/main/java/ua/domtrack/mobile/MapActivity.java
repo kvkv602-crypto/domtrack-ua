@@ -23,7 +23,54 @@ public class MapActivity extends Activity {
     private JSONObject filters;
     private JSONObject mapQuote;
     private final Map<String, String> labels = new HashMap<>();
-    private TextView hint;
+    private TextView hint, coverage;
+    private final android.os.Handler refreshHandler = new android.os.Handler(
+        android.os.Looper.getMainLooper()
+    );
+    private final java.util.concurrent.ExecutorService markerIo =
+        java.util.concurrent.Executors.newSingleThreadExecutor();
+    private boolean active;
+    private final Runnable refresh = new Runnable() {
+        public void run() {
+            if (!active) return;
+            markerIo.execute(() -> {
+                Database db = ((DomTrackApp) getApplication()).db();
+                JSONObject quote = db.state("fx:" + Model.date(), new JSONObject()),
+                    f = Json.copy(filters);
+                f.remove("polygon");
+                ArrayList<JSONObject> rows = new ArrayList<>();
+                int missing = 0;
+                for (JSONObject r : db.listings())
+                    if (!r.optBoolean("hidden") && Model.matches(r, f, quote)) {
+                        if (
+                            r.has("latitude") &&
+                            r.has("longitude") &&
+                            Double.isFinite(r.optDouble("latitude")) &&
+                            Double.isFinite(r.optDouble("longitude"))
+                        ) rows.add(r);
+                        else missing++;
+                    }
+                final int without = missing;
+                runOnUiThread(() -> {
+                    if (!active) return;
+                    mapQuote = quote;
+                    listings.clear();
+                    listings.addAll(rows);
+                    labels.clear();
+                    for (JSONObject r : listings) labels.put(r.optString("id"), price(r));
+                    if (coverage != null) coverage.setText(
+                        "Координаты площадок: " +
+                            rows.size() +
+                            " · без координат: " +
+                            without +
+                            "\n© OpenFreeMap · OpenMapTiles · OpenStreetMap"
+                    );
+                    drawing.invalidate();
+                    refreshHandler.postDelayed(this, 7000);
+                });
+            });
+        }
+    };
     private final ArrayList<LatLng> zone = new ArrayList<>();
     private final ArrayList<JSONObject> listings = new ArrayList<>();
     private final ArrayDeque<ArrayList<LatLng>> undo = new ArrayDeque<>();
@@ -72,6 +119,28 @@ public class MapActivity extends Activity {
             );
         toolbar.addView(modes);
         root.addView(toolbar);
+        root.addView(
+            button("Загрузить координаты из объявлений", () -> {
+                if (SearchService.RUNNING.get()) {
+                    Toast.makeText(
+                        this,
+                        "Дождись завершения поиска или останови его через уведомление",
+                        Toast.LENGTH_LONG
+                    ).show();
+                    return;
+                }
+                try {
+                    SearchService.coordinates(this, Json.copy(filters));
+                    Toast.makeText(
+                        this,
+                        "Координаты загружаются; карта обновится автоматически",
+                        Toast.LENGTH_LONG
+                    ).show();
+                } catch (Exception e) {
+                    Toast.makeText(this, Scanner.safe(e), Toast.LENGTH_LONG).show();
+                }
+            })
+        );
         FrameLayout frame = new FrameLayout(this);
         view = new MapView(this);
         view.onCreate(state);
@@ -109,7 +178,7 @@ public class MapActivity extends Activity {
         noZone.remove("polygon");
         int missing = 0;
         for (JSONObject r : db.listings())
-            if (Model.matches(r, noZone, mapQuote)) {
+            if (!r.optBoolean("hidden") && Model.matches(r, noZone, mapQuote)) {
                 if (
                     r.has("latitude") &&
                     r.has("longitude") &&
@@ -179,7 +248,7 @@ public class MapActivity extends Activity {
 
     private JSONArray polygon() {
         JSONArray out = new JSONArray();
-        for (LatLng p : zone) out.put(new JSONArray().put(p.getLatitude()).put(p.getLongitude()));
+        for (LatLng p : zone) out.put(new JSONArray(java.util.List.of(p.getLatitude(),p.getLongitude())));
         return out;
     }
 
@@ -438,6 +507,8 @@ public class MapActivity extends Activity {
     protected void onStart() {
         super.onStart();
         view.onStart();
+        active = true;
+        refreshHandler.postDelayed(refresh, 7000);
     }
 
     protected void onResume() {
@@ -451,11 +522,14 @@ public class MapActivity extends Activity {
     }
 
     protected void onStop() {
+        active = false;
+        refreshHandler.removeCallbacks(refresh);
         view.onStop();
         super.onStop();
     }
 
     protected void onDestroy() {
+        markerIo.shutdownNow();
         view.onDestroy();
         super.onDestroy();
     }

@@ -4,6 +4,9 @@ on:
     branches: [android-standalone]
     paths: ['android/**', '.github/workflows/android.yml']
   workflow_dispatch:
+concurrency:
+  group: domtrack-android-standalone
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:

@@ -19,7 +19,7 @@ public class SearchService extends Service {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private PowerManager.WakeLock wakeLock;
     private Database db;
-    private Scanner scanner;
+    private volatile Scanner scanner;
     private long lastNotification;
 
     public void onCreate() {
@@ -37,6 +37,14 @@ public class SearchService extends Service {
     static void start(Context context, JSONObject filters) {
         context.startForegroundService(
             new Intent(context, SearchService.class).putExtra("filters", filters.toString())
+        );
+    }
+
+    static void coordinates(Context context, JSONObject filters) {
+        context.startForegroundService(
+            new Intent(context, SearchService.class)
+                .putExtra("filters", filters.toString())
+                .putExtra("mode", "coordinates")
         );
     }
 
@@ -67,10 +75,23 @@ public class SearchService extends Service {
             return START_NOT_STICKY;
         }
         JSONObject filters = Json.obj(requested);
+        String mode = intent == null
+            ? pending.optString("mode", "search")
+            : intent.getStringExtra("mode");
+        boolean coordinates = "coordinates".equals(mode);
         stopped.set(false);
         db.saveState(
             "activeSearch",
-            Json.object("running", true, "filters", requested, "message", "Подготовка поиска…")
+            Json.object(
+                "running",
+                true,
+                "filters",
+                requested,
+                "mode",
+                mode,
+                "message",
+                "Подготовка поиска…"
+            )
         );
         // Keep only the CPU awake during the explicit operation; the screen stays off.
         wakeLock = getSystemService(PowerManager.class).newWakeLock(
@@ -95,8 +116,11 @@ public class SearchService extends Service {
                 scanner = new Scanner(this, db);
                 int n = stopped.get()
                     ? 0
-                    : scanner.scan(true, stopped::get, this::progress, filters);
+                    : coordinates
+                        ? scanner.coordinates(filters, stopped::get, this::progress)
+                        : scanner.scan(true, stopped::get, this::progress, filters);
                 if (
+                    !coordinates &&
                     !stopped.get() &&
                     db.state("settings", new JSONObject()).optBoolean("localAi", true)
                 ) {
@@ -113,9 +137,11 @@ public class SearchService extends Service {
                 JSONObject last = db.state("lastCheck", new JSONObject());
                 message = stopped.get()
                     ? "Поиск остановлен · продолжение сохранено"
-                    : last.optBoolean("complete")
-                        ? "Поиск завершён · обработано записей: " + n
-                        : "Обход приостановлен · проверь состояние источников";
+                    : coordinates
+                        ? "Загрузка координат завершена · найдено: " + n
+                        : last.optBoolean("complete")
+                            ? "Поиск завершён · обработано записей: " + n
+                            : "Обход приостановлен · проверь состояние источников";
             } catch (Exception e) {
                 message = stopped.get()
                     ? "Поиск остановлен · продолжение сохранено"

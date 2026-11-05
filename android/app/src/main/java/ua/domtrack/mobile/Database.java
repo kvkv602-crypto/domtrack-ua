@@ -168,6 +168,25 @@ final class Database extends SQLiteOpenHelper {
         getWritableDatabase().update("listing", v, "id=?", new String[] { id });
     }
 
+    synchronized void location(String id, JSONObject geo) {
+        JSONObject row = get(id);
+        if (row == null) return;
+        for (String key : List.of("latitude", "longitude", "locationAccuracy"))
+            if (geo.has(key)) Json.put(row, key, geo.opt(key));
+        ContentValues values = new ContentValues();
+        values.put("data", row.toString());
+        getWritableDatabase().update("listing", values, "id=?", new String[] { id });
+    }
+
+    synchronized void locationAttempt(String id) {
+        JSONObject row = get(id);
+        if (row == null) return;
+        Json.put(row, "coordinatesCheckedAt", System.currentTimeMillis());
+        ContentValues values = new ContentValues();
+        values.put("data", row.toString());
+        getWritableDatabase().update("listing", values, "id=?", new String[] { id });
+    }
+
     synchronized int ingest(List<JSONObject> rows, boolean notify) {
         return ingest(rows, notify, notify);
     }
@@ -223,7 +242,11 @@ final class Database extends SQLiteOpenHelper {
                 if (old != null) for (String extra : List.of(
                     "structured",
                     "catalogUrl",
-                    "catalogPage"
+                    "catalogPage",
+                    "latitude",
+                    "longitude",
+                    "locationAccuracy",
+                    "coordinatesCheckedAt"
                 ))
                     if (!r.has(extra) && old.has(extra)) Json.put(r, extra, old.opt(extra));
                 boolean changed =

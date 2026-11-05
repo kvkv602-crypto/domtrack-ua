@@ -17,7 +17,11 @@ public class ScanWorker extends Worker {
             !db.state("settings", new org.json.JSONObject()).optBoolean("background", true)
         ) return Result.success();
         try {
-            new Scanner(getApplicationContext(), db).scan(false, this::isStopped, null);
+            new Scanner(getApplicationContext(), db).scan(
+                false,
+                () -> isStopped() || SearchService.RUNNING.get(),
+                null
+            );
             return Result.success();
         } catch (Exception e) {
             db.saveState(
