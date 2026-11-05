@@ -43,7 +43,7 @@ adb shell am start -W -n ua.domtrack.mobile/.MainActivity > "$result_dir/startup
 sleep 5
 
 python3 - <<'PY'
-import os, re, subprocess, time, xml.etree.ElementTree as ET
+import os, re, subprocess, time, json, sqlite3, collections, xml.etree.ElementTree as ET
 from pathlib import Path
 
 out = Path(os.environ['DOMTRACK_SMOKE_DIR'])
@@ -77,13 +77,50 @@ try:
     for label, name in [('Избранное','03-favorites'),('События','04-events'),('Ещё','05-more'),('Поиск','06-search-again')]:
         tap(label)
         capture(name)
+    adb('shell', 'pm', 'grant', 'ua.domtrack.mobile', 'android.permission.POST_NOTIFICATIONS')
+    tap('Проверить')
+    deadline = time.monotonic() + 120
+    visible_count = 0
+    # Do not save screenshots/XML containing actual advertisements or contacts.
+    while time.monotonic() < deadline:
+        time.sleep(3)
+        adb('shell', 'uiautomator', 'dump', '/sdcard/domtrack-live.xml')
+        live = ET.fromstring(adb('exec-out', 'cat', '/sdcard/domtrack-live.xml'))
+        labels = [node.get('text','') for node in live.iter('node')]
+        if any(label.startswith('Проверка завершена') or label.startswith('Проверка прервана') for label in labels):
+            for label in labels:
+                match = re.search(r'Найдено в локальной базе: (\d+)', label)
+                if match:
+                    visible_count = int(match.group(1))
+            break
+    else:
+        raise AssertionError('Bounded manual search did not complete within 120 seconds')
     adb('shell', 'pidof', 'ua.domtrack.mobile')
     crashes = adb('logcat', '-b', 'crash', '-d').decode(errors='replace')
     (out / 'crashes.txt').write_text(crashes)
     if 'FATAL EXCEPTION' in crashes:
         raise AssertionError('Android runtime crash: ' + crashes[-3000:])
-    (out / 'RESULT.txt').write_text('PASS: Android 16 cold start, filter dialog, four native tabs, no process crash. No physical Samsung/battery test.\n')
-    print('Android 16 native startup and navigation: PASS')
+    adb('shell', 'am', 'force-stop', 'ua.domtrack.mobile')
+    private = Path(os.environ['RUNNER_TEMP']) / 'domtrack-db-smoke'
+    private.mkdir(exist_ok=True)
+    for name in ['domtrack.db', 'domtrack.db-wal']:
+        result = subprocess.run(['adb', 'exec-out', 'run-as', 'ua.domtrack.mobile', 'cat', 'databases/' + name], capture_output=True, timeout=30)
+        if result.returncode == 0:
+            (private / name).write_bytes(result.stdout)
+        elif name == 'domtrack.db':
+            raise AssertionError('Cannot inspect development app database')
+    with sqlite3.connect(private / 'domtrack.db') as db:
+        records = [json.loads(row[0]) for row in db.execute('SELECT data FROM listing')]
+        row = db.execute("SELECT data FROM state WHERE name='lastCheck'").fetchone()
+        last = json.loads(row[0]) if row else {}
+    live_result = {'rows': len(records), 'visibleWithEmptyEurBudget': visible_count,
+                   'sources': dict(collections.Counter(r.get('source','unknown') for r in records)),
+                   'pages': last.get('pages'), 'errors': last.get('errors', [])}
+    (out / 'LIVE-SEARCH.json').write_text(json.dumps(live_result, ensure_ascii=False, indent=2))
+    if not records or visible_count < 1:
+        raise AssertionError('Live search returned no visible listings: ' + json.dumps(live_result, ensure_ascii=False))
+    (out / 'RESULT.txt').write_text('PASS: Android 16 cold start, filter dialog, four native tabs, live manual search with EUR and empty budget, no process crash. No physical Samsung/battery test.\n')
+    print('Android 16 native startup, navigation and live search: PASS')
 except Exception as error:
     message = str(error).replace('%','%25').replace('\r','%0D').replace('\n','%0A')
     print('::error title=Android runtime smoke::' + message)
