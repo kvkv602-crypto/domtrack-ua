@@ -1,6 +1,5 @@
 package ua.domtrack.mobile;
 
-import java.net.URI;
 import java.util.*;
 import java.util.regex.*;
 import org.json.*;
@@ -31,6 +30,7 @@ final class AggregatorPages {
             if (id.matches("[1-9][0-9]{0,17}")) visible.putIfAbsent(id, card);
         }
         Map<String, JSONObject> payload = new HashMap<>();
+        StringBuilder flight = new StringBuilder();
         for (Element script : doc.select("script:not([src])")) {
             String raw = script.data().trim();
             try {
@@ -51,16 +51,18 @@ final class AggregatorPages {
                     if (!(data instanceof JSONArray)) continue;
                     Object chunk = ((JSONArray) data).opt(1);
                     if (!(chunk instanceof String)) continue;
-                    for (String line : ((String) chunk).split("\\n")) {
-                        int colon = line.indexOf(':');
-                        if (colon < 0) continue;
-                        String body = line.substring(colon + 1);
-                        if (!body.startsWith("[") && !body.startsWith("{")) continue;
-                        try {
-                            collect(new JSONTokener(body).nextValue(), payload, 0);
-                        } catch (Exception ignored) {}
-                    }
+                    flight.append((String) chunk);
                 }
+            } catch (Exception ignored) {}
+        }
+        if (!flatfy) {
+            // Flight text records are length-delimited and need not end with a newline.
+            // The public cards array is JSON even when its surrounding stream is not.
+            Matcher m = Pattern.compile(
+                "\\\"realties\\\"\\s*:\\s*\\{\\s*\\\"cards\\\"\\s*:\\s*"
+            ).matcher(flight);
+            while (m.find()) try {
+                collect(new JSONTokener(flight.substring(m.end())).nextValue(), payload, 0);
             } catch (Exception ignored) {}
         }
         List<JSONObject> schema = new ArrayList<>();

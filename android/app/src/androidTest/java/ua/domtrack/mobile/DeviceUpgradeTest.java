@@ -317,6 +317,19 @@ public class DeviceUpgradeTest {
                 assertFalse("LUN first page cannot imply full coverage", a.end);
             }
         }
+        for (String provider : List.of("flatfy", "lun")) {
+            Sources.Section section = Sources.sections("Запоріжжя", "house")
+                .stream()
+                .filter(x -> x.source.equals(provider))
+                .findFirst()
+                .orElseThrow();
+            assertTrue(network.robotsAllowed(section.base, db));
+            Network.Page response = network.get(section.base);
+            Sources.Result houses = Sources.parse(response.body, response.url, section, 1);
+            assertTrue(provider + " must return house sale cards", houses.records.size() > 0);
+            assertTrue(houses.records.stream().allMatch(r -> r.optString("kind").equals("house")));
+            Json.put(checks.getJSONObject(provider), "houseRecords", houses.records.size());
+        }
         db.saveState("newSourcesTest", checks);
     }
 

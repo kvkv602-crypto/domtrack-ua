@@ -144,7 +144,7 @@ public class NewSourcesTest {
         ))
             Json.put(camel, pair[1], snake.opt(pair[0]));
         String chunk =
-            "31:" +
+            "e:T5,Hello31:" +
             Json.array(
                 List.of(
                     "$",
