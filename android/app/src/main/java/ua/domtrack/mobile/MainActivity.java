@@ -359,15 +359,18 @@ public class MainActivity extends Activity {
                 );
                 addButton(box, "Все предложения и сравнение", () -> probableGroup(r));
             }
-            if (r.has("confirmedAlternatives")) box.addView(
-                text(
-                    "Подтверждённый объект · предложений: " +
-                        r.optJSONArray("confirmedAlternatives").length() +
-                        " · показана минимальная цена",
-                    12,
-                    GREEN
-                )
-            );
+            if (r.has("confirmedAlternatives")) {
+                box.addView(
+                    text(
+                        "Подтверждённый объект · предложений: " +
+                            r.optJSONArray("confirmedAlternatives").length() +
+                            " · показана минимальная цена",
+                        12,
+                        GREEN
+                    )
+                );
+                addButton(box, "Цены и исходные предложения", () -> confirmedGroup(r));
+            }
             box.addView(
                 text(
                     r.optString("source") + " · проверено " + shortDate(r.optString("lastSeen")),
@@ -1424,6 +1427,35 @@ public class MainActivity extends Activity {
                 toast("Совпадение подтверждено");
             })
             .show();
+    }
+
+    private void confirmedGroup(JSONObject display) {
+        LinearLayout content = column();
+        for (JSONObject record : Json.objects(display.optJSONArray("confirmedAlternatives"))) {
+            content.addView(
+                text(
+                    price(record) +
+                        " · " +
+                        record.optString("source") +
+                        "\n" +
+                        record.optString("title") +
+                        "\nПроверено: " +
+                        shortDate(record.optString("lastSeen")),
+                    16,
+                    INK
+                )
+            );
+            if (List.of("flatfy", "lun").contains(record.optString("source"))) content.addView(
+                text(
+                    "Цена по каталогу агрегатора; на исходной площадке она могла измениться.",
+                    13,
+                    MUTED
+                )
+            );
+            addButton(content, "История и карточка", () -> detail(record.optString("id")));
+            addButton(content, "Открыть исходную площадку", () -> open(record.optString("url")));
+        }
+        dialog("Цены и исходные предложения", content).show();
     }
 
     private void probableGroup(JSONObject display) {
