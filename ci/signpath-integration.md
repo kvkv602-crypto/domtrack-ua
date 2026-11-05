@@ -1,12 +1,12 @@
 # GitHub and SignPath Foundation integration preparation
 
-This document describes the prepared 1.3.0/API4 release path for the public source repository. The exact owner-approved MIT license is active in the root LICENSE, app/LICENSE and package metadata. No Foundation application, approval, certificate, signing policy, hosted signing run or signed release exists yet. Public source publication is not Foundation approval.
+This document describes the prepared 1.3.0/API4 release path for the public source repository. The exact owner-approved MIT license is active in the root LICENSE, app/LICENSE and package metadata. The Foundation application was submitted on 5 November 2026 and is awaiting a decision. No Foundation approval, certificate, signing policy, hosted signing run or trusted signed release exists yet. Submission and public source publication are not Foundation approval.
 
 ## Publication prerequisites
 
 The owner approved the reviewed source publication and exact MIT license, and the repository visibility change is complete. Continue reviewing changes and release artifacts for user data before publishing them. Do not publish a user's database, RIA API key, private logs, account-registration material, signing credentials or old local binaries.
 
-The Foundation also assesses the project's release history, maintenance and reputation. It requires a released application in the intended distribution form. A newly public project has no guaranteed entitlement to signing. If an unsigned development preview is prepared to document the package format, label it explicitly as unsigned and do not claim it will run on protected Windows devices. No adoption, download count, release or independent review should be invented for an application.
+The Foundation also assesses the project's release history, maintenance and reputation. It requires a released application in the intended distribution form. The [v1.3.0-development.1 preview](https://github.com/kvkv602-crypto/domtrack-ua/releases/tag/v1.3.0-development.1) documents the package format and build evidence and is explicitly unsigned; it does not establish successful startup on protected Windows devices. A newly public project has no guaranteed entitlement to signing. No adoption, download count or independent review is claimed.
 
 The proposed maintainer/reviewer/approver is [kvkv602-crypto](https://github.com/kvkv602-crypto). See the [code signing policy](../CODE_SIGNING_POLICY.md), [privacy policy](../PRIVACY.md) and [third-party notices](../THIRD_PARTY_NOTICES.md). The separate Store/MSIX preparation is retained but is not the selected application route.
 

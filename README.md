@@ -6,7 +6,9 @@ DomTrack UA is a local Windows application for Ukrainian apartment and house sal
 
 Version **1.3.0 / API4** is in development. The source repository is public under the owner-approved **MIT license**, with **GitHub + SignPath Foundation** selected as the intended distribution route. [LICENSE](LICENSE) is the active project license; [LICENSE.proposed](LICENSE.proposed) retains the exact approved reference text.
 
-No Foundation application has been submitted, no signing approval or production certificate is configured, and no trusted signed release is available. The earlier local 1.2.0 executable is unsigned and was blocked by Windows Smart App Control. Building a file on GitHub does not, by itself, make Windows trust it.
+The SignPath Foundation application was submitted on **5 November 2026** and is awaiting a decision. No signing approval or production certificate is configured, and no trusted signed release is available. The earlier local 1.2.0 executable is unsigned and was blocked by Windows Smart App Control. Building a file on GitHub does not, by itself, make Windows trust it.
+
+The verified [v1.3.0-development.1 prerelease](https://github.com/kvkv602-crypto/domtrack-ua/releases/tag/v1.3.0-development.1) is an **unsigned development preview**, with build evidence from [GitHub Actions run 41996463951](https://github.com/kvkv602-crypto/domtrack-ua/actions/runs/41996463951). It is not a trusted signed Windows release; native GUI, real DPAPI and Smart App Control acceptance remain unverified.
 
 The Foundation's [eligibility conditions](https://signpath.org/terms.html) require an eligible open-source project and approval. Publication alone does not guarantee acceptance. The separate [MSIX preparation](packaging/msix/README.md) remains a development alternative; it has not produced a certified Store release.
 
