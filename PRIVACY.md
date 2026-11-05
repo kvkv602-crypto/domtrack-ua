@@ -1,6 +1,6 @@
 # Privacy policy
 
-Privacy policy for DomTrack UA's MIT-licensed source publication. Maintainer/contact: [kvkv602-crypto](https://github.com/kvkv602-crypto). Repository: [domtrack-ua](https://github.com/kvkv602-crypto/domtrack-ua). The owner has approved public source publication and the MIT license is active. The repository visibility change is pending completion, and no signed end-user release is available.
+Privacy policy for DomTrack UA's public MIT-licensed source project. Maintainer/contact: [kvkv602-crypto](https://github.com/kvkv602-crypto). Repository: [domtrack-ua](https://github.com/kvkv602-crypto/domtrack-ua). No signed end-user release is available yet.
 
 ## Local information
 

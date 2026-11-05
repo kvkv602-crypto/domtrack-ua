@@ -1,10 +1,10 @@
 # GitHub and SignPath Foundation integration preparation
 
-This document describes the prepared 1.3.0/API4 release path. The owner has approved public source publication under MIT. The exact approved license has been activated in the root LICENSE, app/LICENSE and package metadata; the repository visibility change is pending completion. No Foundation application, approval, certificate, signing policy, hosted signing run or signed release exists yet. Publication approval is not Foundation approval.
+This document describes the prepared 1.3.0/API4 release path for the public source repository. The exact owner-approved MIT license is active in the root LICENSE, app/LICENSE and package metadata. No Foundation application, approval, certificate, signing policy, hosted signing run or signed release exists yet. Public source publication is not Foundation approval.
 
 ## Publication prerequisites
 
-The owner has approved the reviewed source publication and exact MIT license. Inspect the complete Git history and repository artifacts before completing the visibility change. Do not publish a user's database, RIA API key, private logs, account-registration material, signing credentials or old local binaries.
+The owner approved the reviewed source publication and exact MIT license, and the repository visibility change is complete. Continue reviewing changes and release artifacts for user data before publishing them. Do not publish a user's database, RIA API key, private logs, account-registration material, signing credentials or old local binaries.
 
 The Foundation also assesses the project's release history, maintenance and reputation. It requires a released application in the intended distribution form. A newly public project has no guaranteed entitlement to signing. If an unsigned development preview is prepared to document the package format, label it explicitly as unsigned and do not claim it will run on protected Windows devices. No adoption, download count, release or independent review should be invented for an application.
 

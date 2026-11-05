@@ -1,7 +1,7 @@
 {
-  "status": "mit-source-approved-awaiting-publication",
+  "status": "public-source-awaiting-signpath-application",
   "repository": "https://github.com/kvkv602-crypto/domtrack-ua",
-  "visibility": "private",
+  "visibility": "public",
   "license": "MIT",
   "proposedLicense": "MIT",
   "publicationApprovalPending": false,

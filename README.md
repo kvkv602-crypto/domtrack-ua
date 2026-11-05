@@ -4,7 +4,7 @@ DomTrack UA is a local Windows application for Ukrainian apartment and house sal
 
 ## Publication and release status
 
-Version **1.3.0 / API4** is in development. The owner has approved public source publication under the **MIT license** and selected the **GitHub + SignPath Foundation** distribution route. [LICENSE](LICENSE) is the active project license; [LICENSE.proposed](LICENSE.proposed) retains the exact approved reference text. The repository visibility change is pending completion; this document does not claim it is already public.
+Version **1.3.0 / API4** is in development. The source repository is public under the owner-approved **MIT license**, with **GitHub + SignPath Foundation** selected as the intended distribution route. [LICENSE](LICENSE) is the active project license; [LICENSE.proposed](LICENSE.proposed) retains the exact approved reference text.
 
 No Foundation application has been submitted, no signing approval or production certificate is configured, and no trusted signed release is available. The earlier local 1.2.0 executable is unsigned and was blocked by Windows Smart App Control. Building a file on GitHub does not, by itself, make Windows trust it.
 
@@ -31,7 +31,7 @@ To remove the single-file edition, exit it, remove the downloaded executable and
 
 ## Build and signing
 
-[Source CI](.github/workflows/build.yml) restores the pinned official Node.js and WebView2 SDK inputs, checks their hashes and vendor signatures, runs source tests, and compiles an unsigned development folder. The private development environment's executable is not a distribution dependency. CI artifacts are development evidence, not a signed Windows release.
+[Source CI](.github/workflows/build.yml) restores the pinned official Node.js and WebView2 SDK inputs, checks their hashes and vendor signatures, and runs source tests and packaging-boundary checks. It compiles and verifies an **unsigned single-file development preview** with a native-only payload, without executing the application or its native Windows helpers. The private development environment's executable is not a distribution dependency. Uploaded artifacts and test reports are development evidence, not a signed Windows release.
 
 The [SignPath integration preparation](ci/signpath-integration.md) separates signing the inner native launcher from signing the outer package. Version 1.3's launcher contains the Windows DPAPI/notification bridge; the proposed production payload excludes the old PowerShell helpers. Missing or policy-denied native components fail closed.
 

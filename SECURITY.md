@@ -1,6 +1,6 @@
 # Security reports
 
-The owner has approved the project's initial public source publication under MIT. Publication is being prepared; no supported signed end-user version exists yet. The maintainer is [kvkv602-crypto](https://github.com/kvkv602-crypto).
+The project's source repository is public under MIT. No supported signed end-user version exists yet. The maintainer is [kvkv602-crypto](https://github.com/kvkv602-crypto).
 
 Do not include API keys, passwords, personal databases, raw listings with private notes, or signing credentials in a public issue. Prefer a minimal reproduction with synthetic data. Repository publication and CI do not require a user's RIA key.
 

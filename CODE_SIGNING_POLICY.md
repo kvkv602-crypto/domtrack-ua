@@ -2,7 +2,7 @@
 
 ## Current status
 
-DomTrack UA is preparing a public-source application to SignPath Foundation. The owner has approved public publication, and the project's own code is now under the MIT [LICENSE](LICENSE). The repository visibility change is still pending completion. No Foundation application, service approval, production signing configuration or signed release exists yet.
+DomTrack UA is a public MIT-licensed source project preparing an application to SignPath Foundation. The project's own code is covered by [LICENSE](LICENSE). No Foundation application, service approval, production signing configuration or signed release exists yet.
 
 The following attribution is reserved for an accepted and configured Foundation project and must not be presented as a current endorsement: “Free code signing provided by [SignPath.io](https://signpath.io), certificate by [SignPath Foundation](https://signpath.org).”
 
