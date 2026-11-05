@@ -9,6 +9,46 @@ import org.junit.Test;
 public class NewSourcesTest {
 
     @Test
+    public void olxMobileCatalogAcceptsItsOfficialDesktopCanonicalAndAdLinks() {
+        Sources.Section s = section("olx");
+        String html =
+            "<link rel='canonical' href='" +
+            s.base.replace("m.olx.ua", "www.olx.ua") +
+            "'><div data-cy='l-card'><a href='https://www.olx.ua/d/uk/obyavlenie/test-IDabc123.html'><h4>Продам квартиру</h4></a><p data-testid='ad-price'>11 000 $</p><p data-testid='location-date'>Запоріжжя, Центр - Сьогодні</p></div>";
+        assertEquals(1, Sources.parse(html, s.base, s, 1).records.size());
+        assertFalse(Network.sameCatalogSite("m.olx.ua", "olx.ua.evil.example"));
+        assertFalse(Network.sameCatalogSite("rieltor.ua", "m.olx.ua"));
+    }
+
+    @Test
+    public void officialOlxListingIdGroupsMobileAndDesktopCopies() {
+        JSONObject mobile = Json.object(
+                "url",
+                "https://m.olx.ua/uk/obyavlenie/test-IDabc123.html",
+                "price",
+                11000,
+                "currency",
+                "USD"
+            ),
+            desktop = Json.object(
+                "url",
+                "https://www.olx.ua/d/uk/obyavlenie/different-title-IDabc123.html",
+                "price",
+                12000,
+                "currency",
+                "USD"
+            );
+        List<JSONObject> result = Dedupe.collapsed(
+            List.of(mobile, desktop),
+            new JSONObject(),
+            "USD"
+        );
+        assertEquals(1, result.size());
+        assertEquals(11000, result.get(0).optDouble("price"), 0);
+        assertEquals(2, result.get(0).optJSONArray("confirmedAlternatives").length());
+    }
+
+    @Test
     public void unavailableRobotsPolicyDoesNotHidePublicCatalogButRateLimitsAndOutagesStillPause() {
         assertTrue(Network.robotsUnavailable(403));
         assertTrue(Network.robotsUnavailable(404));

@@ -140,7 +140,7 @@ final class Sources {
                         city,
                         row[1],
                         k,
-                        "https://www.olx.ua/uk/nedvizhimost/" +
+                        "https://m.olx.ua/uk/nedvizhimost/" +
                             (k.equals("house")
                                     ? "doma/prodazha-domov/"
                                     : "kvartiry/prodazha-kvartir/") +
@@ -359,7 +359,7 @@ final class Sources {
                 u = b.resolve(link.attr("href"));
             if (
                 !u.getScheme().equals("https") ||
-                !u.getHost().equals(b.getHost()) ||
+                !Network.sameCatalogSite(u.getHost(), b.getHost()) ||
                 u.getUserInfo() != null ||
                 u.getPort() != -1 ||
                 !u.getPath().matches(regex)

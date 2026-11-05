@@ -11,7 +11,7 @@ final class Pagination {
             URI b = URI.create(base),
                 u = b.resolve(href);
             if (
-                !Objects.equals(u.getHost(), b.getHost()) ||
+                !Network.sameCatalogSite(u.getHost(), b.getHost()) ||
                 !u.getPath().equals(b.getPath()) ||
                 u.getFragment() != null
             ) return null;

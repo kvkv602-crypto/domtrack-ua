@@ -116,7 +116,14 @@ final class Dedupe {
                     "https://dom\\.ria\\.com/(?:uk/)?realty-prodaja-[a-z0-9-]+-([0-9]+)\\.html(?:[?#].*)?$"
                 ).matcher(url);
                 if (identity.matches()) group = "source:dom.ria.com:" + identity.group(1);
-                else group = "source-url:" + Model.identity(Json.object("url", url));
+                else {
+                    Matcher olx = Pattern.compile(
+                        "https://(?:www|m)\\.olx\\.ua/(?:d/)?(?:uk/)?obyavlenie/[^/]+-ID([A-Za-z0-9]+)\\.html(?:[?#].*)?$"
+                    ).matcher(url);
+                    group = olx.matches()
+                        ? "source:olx.ua:" + olx.group(1)
+                        : "source-url:" + Model.identity(Json.object("url", url));
+                }
             }
             if (group.isBlank()) out.add(r);
             else groups.computeIfAbsent(group, k -> new ArrayList<>()).add(r);

@@ -12,6 +12,15 @@ final class Network {
     static final int MAX_BYTES = 4 * 1024 * 1024;
     static final String AGENT = "DomTrackUA/0.2 Android (personal property monitor)";
 
+    static boolean sameCatalogSite(String a, String b) {
+        if (a == null || b == null) return false;
+        return (
+            a.equalsIgnoreCase(b) ||
+            (List.of("www.olx.ua", "m.olx.ua").contains(a.toLowerCase(Locale.ROOT)) &&
+                List.of("www.olx.ua", "m.olx.ua").contains(b.toLowerCase(Locale.ROOT)))
+        );
+    }
+
     static final class HttpFailure extends IOException {
 
         final int status;
