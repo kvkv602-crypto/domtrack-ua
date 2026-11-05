@@ -43,7 +43,7 @@ final class Coordinates {
         if (!identity.isBlank() && !identity.equals(url)) return;
         JSONObject record = new JSONObject();
         Sources.walkLd(node, record, true);
-        if (record.has("latitude") && record.has("longitude")) out.add(record);
+        if (Double.isFinite(record.optDouble("latitude")) && Double.isFinite(record.optDouble("longitude"))) out.add(record);
     }
 
     static int load(
@@ -62,7 +62,7 @@ final class Coordinates {
             if (
                 record.optBoolean("hidden") ||
                 !Model.matches(record, filters, quote) ||
-                (record.has("latitude") && record.has("longitude"))
+                (Double.isFinite(record.optDouble("latitude")) && Double.isFinite(record.optDouble("longitude")))
             ) continue;
             if (
                 System.currentTimeMillis() - record.optLong("coordinatesCheckedAt") < 86400000L

@@ -21,6 +21,7 @@ public class SearchService extends Service {
     private Database db;
     private volatile Scanner scanner;
     private long lastNotification;
+    private final Handler lifetimeHandler=new Handler(Looper.getMainLooper());
 
     public void onCreate() {
         super.onCreate();
@@ -100,7 +101,7 @@ public class SearchService extends Service {
         );
         wakeLock.setReferenceCounted(false);
         wakeLock.acquire(TimeUnit.HOURS.toMillis(5));
-        new Handler(Looper.getMainLooper()).postDelayed(
+        lifetimeHandler.postDelayed(
             () -> {
                 if (RUNNING.get()) {
                     stopped.set(true);
@@ -147,7 +148,6 @@ public class SearchService extends Service {
                     ? "Поиск остановлен · продолжение сохранено"
                     : "Поиск прерван: " + Scanner.safe(e);
             } finally {
-                RUNNING.set(false);
                 releaseWakeLock();
             }
             db.saveState(
@@ -170,7 +170,8 @@ public class SearchService extends Service {
                 );
             } catch (SecurityException ignored) {}
             stopForeground(STOP_FOREGROUND_DETACH);
-            stopSelf();
+            RUNNING.set(false);
+            stopSelf(id);
         });
         return START_REDELIVER_INTENT;
     }
@@ -243,6 +244,7 @@ public class SearchService extends Service {
     }
 
     public void onDestroy() {
+        lifetimeHandler.removeCallbacksAndMessages(null);
         stopped.set(true);
         if (scanner != null) scanner.cancel();
         executor.shutdownNow();

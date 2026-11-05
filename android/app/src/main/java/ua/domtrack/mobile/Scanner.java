@@ -60,6 +60,7 @@ final class Scanner {
             cancelled.get() || stop.getAsBoolean() || Thread.currentThread().isInterrupted();
         try {
             List<Sources.Section> sections = sectionsFor(db.searches(), requested);
+            if(sections.isEmpty() && db.listings().stream().noneMatch(r->r.optJSONObject("watch")!=null && r.optJSONObject("watch").optBoolean("enabled",true))) return 0;
             try {
                 Fx.get(db, net, Model.date());
             } catch (Exception e) {
