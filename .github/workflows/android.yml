@@ -55,7 +55,8 @@ jobs:
           exit "$build_status"
       - name: Verify APK signature
         run: |
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose android/app/build/outputs/apk/debug/app-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs android/app/build/outputs/apk/debug/app-debug.apk | tee android/app/build/outputs/apk/debug/APK-SIGNATURE.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging android/app/build/outputs/apk/debug/app-debug.apk > android/app/build/outputs/apk/debug/APK-MANIFEST.txt
           sha256sum android/app/build/outputs/apk/debug/app-debug.apk > android/app/build/outputs/apk/debug/SHA256SUMS
       - name: Android 16 native startup and navigation
         run: bash android/ci/emulator-smoke.sh

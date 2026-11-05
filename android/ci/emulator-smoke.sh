@@ -5,12 +5,24 @@ result_dir="$PWD/android/app/build/reports/emulator-smoke"
 mkdir -p "$result_dir"
 export DOMTRACK_SMOKE_DIR="$result_dir"
 export PATH="$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+export ANDROID_USER_HOME="$RUNNER_TEMP/domtrack-android"
+export ANDROID_AVD_HOME="$ANDROID_USER_HOME/avd"
+mkdir -p "$ANDROID_AVD_HOME"
 
 "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "emulator" "system-images;android-36;google_apis;x86_64" > "$result_dir/sdk-install.log" 2>&1
 if [ -e /dev/kvm ]; then
   sudo chown "$(id -u):$(id -g)" /dev/kvm
 fi
-echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name DomTrackSmoke --package "system-images;android-36;google_apis;x86_64" --device pixel_7 > "$result_dir/avd.log" 2>&1
+echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name DomTrackSmoke --path "$ANDROID_AVD_HOME/DomTrackSmoke.avd" --package "system-images;android-36;google_apis;x86_64" --device pixel_7 > "$result_dir/avd.log" 2>&1
+test -f "$ANDROID_AVD_HOME/DomTrackSmoke.avd/config.ini"
+if [ ! -f "$ANDROID_AVD_HOME/DomTrackSmoke.ini" ]; then
+  printf 'avd.ini.encoding=UTF-8\npath=%s\ntarget=android-36\n' "$ANDROID_AVD_HOME/DomTrackSmoke.avd" > "$ANDROID_AVD_HOME/DomTrackSmoke.ini"
+fi
+emulator -list-avds > "$result_dir/avd-list.txt"
+if ! grep -Fxq DomTrackSmoke "$result_dir/avd-list.txt"; then
+  echo '::error::Created Android virtual device is not visible to emulator'
+  exit 1
+fi
 emulator -avd DomTrackSmoke -no-window -no-audio -no-boot-anim -no-snapshot -gpu swiftshader -memory 2048 -camera-back none -camera-front none > "$result_dir/emulator.log" 2>&1 &
 emulator_pid=$!
 trap 'adb emu kill >/dev/null 2>&1 || true; kill "$emulator_pid" >/dev/null 2>&1 || true' EXIT
