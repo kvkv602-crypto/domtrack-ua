@@ -34,7 +34,7 @@ final class Ria {
         if (delay > 0) Thread.sleep(delay);
         Json.put(quota, "used", quota.optInt("used") + 1);
         Json.put(quota, "lastRequest", System.currentTimeMillis());
-        db.state(quotaKey, quota);
+        db.saveState(quotaKey, quota);
         okhttp3.HttpUrl.Builder b = Network.safe("https://developers.ria.com" + path)
             .newBuilder()
             .addQueryParameter("api_key", key);
@@ -48,7 +48,7 @@ final class Ria {
                 Objects.toString(e.getMessage(), "").contains("403")
             ) {
                 Json.put(quota, "blockedUntil", System.currentTimeMillis() + 3600000L);
-                db.state(quotaKey, quota);
+                db.saveState(quotaKey, quota);
             }
             throw new IllegalArgumentException(
                 "Не удалось получить данные RIA. Проверь доступ и квоту в кабинете."
@@ -74,7 +74,7 @@ final class Ria {
         JSONArray cities = (JSONArray) request("/dom/cities/" + state, Map.of("lang_id", "4"));
         for (JSONObject r : Json.objects(cities))
             if (Model.normalized(r.optString("name")).equals(Model.normalized(city))) {
-                db.state(
+                db.saveState(
                     "ria-city:" + city,
                     Json.object("stateId", state, "cityId", r.optInt("cityID"))
                 );
@@ -122,7 +122,7 @@ final class Ria {
             Json.put(progress, "pending", new JSONArray(pending));
             Json.put(progress, "currentKind", current);
             Json.put(progress, "count", found.optInt("count"));
-            db.state(stateKey, progress);
+            db.saveState(stateKey, progress);
         }
         int imported = 0;
         for (int i = 0; i < 2 && !pending.isEmpty(); i++) {
@@ -132,7 +132,7 @@ final class Ria {
             if (r != null) imported += db.ingest(List.of(r), true);
             pending.remove(0);
             Json.put(progress, "pending", new JSONArray(pending));
-            db.state(stateKey, progress);
+            db.saveState(stateKey, progress);
         }
         if (pending.isEmpty()) {
             if (kind.equals("both") && current.equals("apartment")) Json.put(
@@ -144,7 +144,7 @@ final class Ria {
                 Json.put(progress, "kind", "apartment");
                 Json.put(progress, "page", progress.optInt("page") + 1);
             }
-            db.state(stateKey, progress);
+            db.saveState(stateKey, progress);
         }
         return imported;
     }

@@ -95,7 +95,7 @@ final class Scanner {
                         "error",
                         "Достигнут защитный предел страниц; обход не завершён"
                     );
-                    db.state("section:" + section.key(), state);
+                    db.saveState("section:" + section.key(), state);
                     continue;
                 }
                 if (progress != null) progress.accept(
@@ -130,7 +130,7 @@ final class Scanner {
                         }
                         Json.put(state, "checkedAt", Model.now());
                         Json.put(state, "frontNext", !front);
-                        db.state("section:" + section.key(), state);
+                        db.saveState("section:" + section.key(), state);
                         continue;
                     }
                     Sources.Result result = Sources.parse(
@@ -150,7 +150,7 @@ final class Scanner {
                     }
                     boolean baseline = cache.optBoolean("observed", false);
                     imported += db.ingest(result.records, baseline, true);
-                    db.state(
+                    db.saveState(
                         "cache:" + Model.hash(url),
                         Json.object(
                             "observed",
@@ -177,10 +177,10 @@ final class Scanner {
                         Json.put(state, "complete", result.end);
                         Json.put(state, "fingerprint", result.fingerprint);
                     }
-                    db.state("section:" + section.key(), state);
+                    db.saveState("section:" + section.key(), state);
                     if (!deep && state.optBoolean("complete")) {
                         Json.put(state, "frontNext", true);
-                        db.state("section:" + section.key(), state);
+                        db.saveState("section:" + section.key(), state);
                     }
                 } catch (Exception e) {
                     failed.add(section.key());
@@ -193,10 +193,10 @@ final class Scanner {
                         System.currentTimeMillis() +
                             Math.min(21600000L, 900000L * (1L << Math.min(4, n - 1)))
                     );
-                    db.state("section:" + section.key(), state);
+                    db.saveState("section:" + section.key(), state);
                     failures.put(section.source + ": " + safe(e));
                 }
-                db.state("scanSchedule", Json.object("cursor", cursor));
+                db.saveState("scanSchedule", Json.object("cursor", cursor));
                 if (!stop.getAsBoolean()) Thread.sleep(2000);
             }
             // Individually watched structured pages are independent of the PC and catalog order.
@@ -222,7 +222,7 @@ final class Scanner {
                         stop.getAsBoolean() ||
                         System.currentTimeMillis() - started >= limit
                     ) break;
-                    db.state("watchCursor", Json.object("next", watchCursor + watchIndex + 1));
+                    db.saveState("watchCursor", Json.object("next", watchCursor + watchIndex + 1));
                     JSONObject watch = r.optJSONObject("watch");
                     if (watch == null || !watch.optBoolean("enabled", true)) continue;
                     try {
@@ -267,7 +267,7 @@ final class Scanner {
                 }
             }
             Alerts.deliver(context, db);
-            db.state(
+            db.saveState(
                 "lastCheck",
                 Json.object(
                     "at",

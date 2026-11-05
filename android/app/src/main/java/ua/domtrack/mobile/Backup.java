@@ -95,7 +95,7 @@ final class Backup {
         }
         for (JSONObject s : Json.objects(data.optJSONArray("searches"))) db.saveSearch(s);
         JSONObject attachments = data.optJSONObject("attachments");
-        if (attachments != null) for (String id : attachments.keySet())
+        if (attachments != null) for (String id : Json.keys(attachments))
             if (id.matches("[a-f0-9]{64}") && db.get(id) != null) {
                 JSONObject photo = attachments.optJSONObject(id);
                 if (
@@ -103,7 +103,7 @@ final class Backup {
                     photo.optJSONArray("items") != null &&
                     photo.optJSONArray("items").length() <= 3 &&
                     photo.toString().length() < 1300000
-                ) db.state("photos:" + id, photo);
+                ) db.saveState("photos:" + id, photo);
             }
         return n;
     }

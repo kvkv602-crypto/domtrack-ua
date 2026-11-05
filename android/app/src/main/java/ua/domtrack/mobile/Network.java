@@ -145,7 +145,7 @@ final class Network {
                 if (e.getMessage().equals("Сайт ответил HTTP 404")) text = "";
                 else throw new IOException("Не удалось проверить robots.txt");
             }
-            db.state(
+            db.saveState(
                 "robots:" + root,
                 Json.object("body", text, "checkedAt", System.currentTimeMillis())
             );

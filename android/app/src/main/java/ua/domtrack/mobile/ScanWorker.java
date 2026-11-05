@@ -20,7 +20,7 @@ public class ScanWorker extends Worker {
             new Scanner(getApplicationContext(), db).scan(false, this::isStopped, null);
             return Result.success();
         } catch (Exception e) {
-            db.state(
+            db.saveState(
                 "lastCheck",
                 Json.object(
                     "at",

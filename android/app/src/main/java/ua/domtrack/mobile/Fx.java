@@ -46,7 +46,7 @@ final class Fx {
             "checkedAt",
             Model.now()
         );
-        db.state("fx:" + date, quote);
+        db.saveState("fx:" + date, quote);
         return quote;
     }
 }

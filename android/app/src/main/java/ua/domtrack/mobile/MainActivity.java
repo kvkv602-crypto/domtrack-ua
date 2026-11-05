@@ -578,7 +578,7 @@ public class MainActivity extends Activity {
                         ) throw new IllegalArgumentException("Значение «от» больше «до»");
                     if (filters.has("polygon")) Json.put(f, "polygon", filters.opt("polygon"));
                     filters = f;
-                    db.state("currentFilters", f);
+                    db.saveState("currentFilters", f);
                     visibleCount = 30;
                     d.dismiss();
                     render();
@@ -922,7 +922,7 @@ public class MainActivity extends Activity {
             box.addView(active);
             addButton(box, "Открыть поиск", () -> {
                 filters = Json.copy(s.optJSONObject("filters"));
-                db.state("currentFilters", filters);
+                db.saveState("currentFilters", filters);
                 tab = "Поиск";
                 render();
             });
@@ -1029,7 +1029,7 @@ public class MainActivity extends Activity {
         s.setChecked(settings.optBoolean(key, fallback));
         s.setOnCheckedChangeListener((v, on) -> {
             Json.put(settings, key, on);
-            db.state("settings", settings);
+            db.saveState("settings", settings);
             ((DomTrackApp) getApplication()).schedule();
         });
         parent.addView(s);
@@ -1240,7 +1240,7 @@ public class MainActivity extends Activity {
                         );
                         if (zone.length() < 3) throw new IllegalArgumentException();
                         Json.put(filters, "polygon", zone);
-                        db.state("currentFilters", filters);
+                        db.saveState("currentFilters", filters);
                         toast(
                             "Территория сохранена. Объекты без координат не попадут в этот фильтр."
                         );
@@ -1252,7 +1252,7 @@ public class MainActivity extends Activity {
             );
             addButton(content, "Убрать территорию", () -> {
                 filters.remove("polygon");
-                db.state("currentFilters", filters);
+                db.saveState("currentFilters", filters);
                 web.evaluateJavascript("window.zone=[];window.redraw()", null);
                 render();
             });
@@ -1351,7 +1351,7 @@ public class MainActivity extends Activity {
                     "В этой версии до трёх личных фотографий на объект"
                 );
                 photos.put(Photos.selected(this, uri));
-                db.state("photos:" + listing, state);
+                db.saveState("photos:" + listing, state);
                 return "Фотография сохранена на телефоне";
             });
             return;
@@ -1493,7 +1493,7 @@ public class MainActivity extends Activity {
                     comparison();
                 });
                 addButton(box, "Это разные объекты", () -> {
-                    db.state(rule, Json.object("different", true));
+                    db.saveState(rule, Json.object("different", true));
                     toast("Указано: разные объекты");
                 });
                 content.addView(box);

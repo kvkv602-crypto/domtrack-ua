@@ -42,7 +42,7 @@ final class Database extends SQLiteOpenHelper {
         }
     }
 
-    synchronized void state(String name, JSONObject value) {
+    synchronized void saveState(String name, JSONObject value) {
         ContentValues v = new ContentValues();
         v.put("name", name);
         v.put("data", value.toString());
@@ -103,13 +103,13 @@ final class Database extends SQLiteOpenHelper {
         Json.put(search, "id", id);
         rows.removeIf(r -> r.optString("id").equals(id));
         rows.add(search);
-        state("searches", Json.object("items", Json.array(rows)));
+        saveState("searches", Json.object("items", Json.array(rows)));
     }
 
     synchronized void deleteSearch(String id) {
         List<JSONObject> rows = searches();
         rows.removeIf(r -> r.optString("id").equals(id));
-        state("searches", Json.object("items", Json.array(rows)));
+        saveState("searches", Json.object("items", Json.array(rows)));
     }
 
     synchronized void local(String id, String name, Object value) {

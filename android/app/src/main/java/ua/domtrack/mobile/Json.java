@@ -45,4 +45,10 @@ final class Json {
         for (JSONObject o : list) a.put(o);
         return a;
     }
+
+    static List<String> keys(JSONObject object) {
+        List<String> result = new ArrayList<>();
+        if (object != null) object.keys().forEachRemaining(result::add);
+        return result;
+    }
 }
