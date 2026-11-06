@@ -94,6 +94,12 @@ try:
     for label, name in [('Избранное','03-favorites'),('События','04-events'),('Ещё','05-more'),('Поиск','06-search-again')]:
         tap(label)
         capture(name)
+    # Exercise the real automatic Worker before any manual Search-button test.
+    automatic = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.AutoCheckDeviceTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=180)
+    automatic_output = automatic.stdout.decode(errors='replace') + automatic.stderr.decode(errors='replace')
+    (out / 'AUTOMATIC-WORKER.txt').write_text(automatic_output)
+    if automatic.returncode != 0 or 'FAILURES!!!' in automatic_output or 'INSTRUMENTATION_FAILED' in automatic_output or 'OK (' not in automatic_output:
+        raise AssertionError('Automatic Worker regression failed: ' + automatic_output[-10000:])
     # Test output contains synthetic tokenizer text and aggregate counts only.
     result = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.DeviceUpgradeTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=360)
     output = result.stdout.decode(errors='replace') + result.stderr.decode(errors='replace')
