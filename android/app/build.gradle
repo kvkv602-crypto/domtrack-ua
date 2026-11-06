@@ -7,7 +7,7 @@ android {
     externalNativeBuild { cmake { path file('src/main/cpp/CMakeLists.txt'); version '3.22.1' } }
     androidResources { noCompress 'onnx', 'model' }
     packaging { jniLibs { pickFirsts += ['**/libc++_shared.so'] } }
-    defaultConfig { applicationId 'ua.domtrack.mobile'; minSdk 36; targetSdk 36; versionCode 2; versionName '0.2.0'; ndk { abiFilters 'arm64-v8a', 'x86_64' }; externalNativeBuild { cmake { cppFlags '-std=c++17'; targets 'domtrack_tokenizer' } }; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
+    defaultConfig { applicationId 'ua.domtrack.mobile'; minSdk 36; targetSdk 36; versionCode 3; versionName '0.2.1'; ndk { abiFilters 'arm64-v8a', 'x86_64' }; externalNativeBuild { cmake { cppFlags '-std=c++17'; targets 'domtrack_tokenizer' } }; testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner' }
     compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
     buildTypes { release { minifyEnabled false } }
     testOptions { unitTests.returnDefaultValues = true }

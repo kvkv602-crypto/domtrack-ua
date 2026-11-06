@@ -95,11 +95,21 @@ try:
         tap(label)
         capture(name)
     # Exercise the real automatic Worker before any manual Search-button test.
-    automatic = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.AutoCheckDeviceTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=180)
-    automatic_output = automatic.stdout.decode(errors='replace') + automatic.stderr.decode(errors='replace')
+    automatic = subprocess.Popen(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.AutoCheckDeviceTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True)
+    automatic_lines = []
+    with (out / 'AUTOMATIC-WORKER.txt').open('w') as automatic_log:
+        for line in automatic.stdout:
+            automatic_lines.append(line)
+            automatic_log.write(line)
+            automatic_log.flush()
+            if line.strip().startswith('AUTO_'):
+                print('::notice title=Android automatic check::' + line.strip(), flush=True)
+    automatic.wait(timeout=30)
+    automatic_output = ''.join(automatic_lines)
     (out / 'AUTOMATIC-WORKER.txt').write_text(automatic_output)
     if automatic.returncode != 0 or 'FAILURES!!!' in automatic_output or 'INSTRUMENTATION_FAILED' in automatic_output or 'OK (' not in automatic_output:
         raise AssertionError('Automatic Worker regression failed: ' + automatic_output[-10000:])
+    (out / 'AUTOMATIC-CHECK.png').write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/automatic-check.png'))
     # Test output contains synthetic tokenizer text and aggregate counts only.
     result = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.DeviceUpgradeTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=360)
     output = result.stdout.decode(errors='replace') + result.stderr.decode(errors='replace')
@@ -134,7 +144,7 @@ try:
         row = db.execute("SELECT data FROM state WHERE name='lastCheck'").fetchone()
         last = json.loads(row[0]) if row else {}
         extra = {}
-        for name in ['aiDeviceTest','screenOffTest','newSourcesTest','mapDeviceTest']:
+        for name in ['aiDeviceTest','screenOffTest','newSourcesTest','mapDeviceTest','automaticDeviceTest']:
             row = db.execute('SELECT data FROM state WHERE name=?',(name,)).fetchone()
             extra[name] = json.loads(row[0]) if row else {}
     (out / 'DEVICE-CHECKS.json').write_text(json.dumps(extra,indent=2))

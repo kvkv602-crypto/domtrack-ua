@@ -171,6 +171,7 @@ public class SearchService extends Service {
             } catch (SecurityException ignored) {}
             stopForeground(STOP_FOREGROUND_DETACH);
             RUNNING.set(false);
+            AutoChecks.catchUpIfDue(this, db);
             stopSelf(id);
         });
         return START_REDELIVER_INTENT;

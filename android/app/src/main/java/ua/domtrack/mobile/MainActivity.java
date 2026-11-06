@@ -64,6 +64,9 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         resumed = true;
+        lastAutoPoll = 0;
+        AutoChecks.schedule(this, db);
+        AutoChecks.catchUpIfDue(this, db);
         handler.post(searchRefresh);
         Alerts.deliver(this, db);
         render();
@@ -87,14 +90,25 @@ public class MainActivity extends Activity {
 
     private boolean searchWasRunning;
     private long lastSearchRender;
+    private long lastAutoPoll;
+    private String lastAutoState = "";
     private final Runnable searchRefresh = new Runnable() {
         public void run() {
             if (!resumed) return;
             boolean running = SearchService.RUNNING.get();
+            long now = System.currentTimeMillis();
+            if (now - lastAutoPoll >= 30000) {
+                lastAutoPoll = now;
+                AutoChecks.catchUpIfDue(MainActivity.this, db);
+            }
+            String autoState = db.state("autoCheck", new JSONObject()).toString();
+            boolean automaticChanged = !autoState.equals(lastAutoState);
+            lastAutoState = autoState;
             JSONObject search = db.state("activeSearch", new JSONObject());
             if (running || searchWasRunning) status.setText(search.optString("message", "Поиск…"));
+            else if (automaticChanged) status.setText(AutoChecks.summary(db).split("\n")[0]);
             if (
-                running != searchWasRunning ||
+                automaticChanged || running != searchWasRunning ||
                 (running && System.currentTimeMillis() - lastSearchRender > 7000)
             ) {
                 lastSearchRender = System.currentTimeMillis();
@@ -412,6 +426,8 @@ public class MainActivity extends Activity {
             render();
         });
         JSONObject last = db.state("lastCheck", new JSONObject());
+        body.addView(text(AutoChecks.summary(db), 12, MUTED));
+        addButton(body, "Состояние автопроверки", this::automaticStatus);
         body.addView(
             text(
                 last.has("at")
@@ -656,6 +672,7 @@ public class MainActivity extends Activity {
                     Json.copy(filters)
                 );
                 db.saveSearch(saved);
+                AutoChecks.targetsChanged(this, db);
                 requestNotifications();
                 toast("Поиск сохранён. Уведомления появятся после обнаружения новых изменений.");
             }
@@ -679,6 +696,7 @@ public class MainActivity extends Activity {
         );
         requestNotifications();
         try {
+            ((DomTrackApp) getApplication()).schedule();
             SearchService.start(this, Json.copy(filters));
             status.setText("Полный поиск · можно выключить экран");
         } catch (Exception e) {
@@ -775,6 +793,7 @@ public class MainActivity extends Activity {
             JSONObject w = watch == null ? new JSONObject() : Json.copy(watch);
             Json.put(w, "enabled", on);
             db.local(id, "watch", w);
+            AutoChecks.targetsChanged(this, db);
             if (on) requestNotifications();
         });
         content.addView(enabled);
@@ -903,6 +922,7 @@ public class MainActivity extends Activity {
                         )
                     );
                     requestNotifications();
+                    AutoChecks.targetsChanged(this, db);
                     d.dismiss();
                     toast("Порог сохранён");
                 } catch (Exception e) {
@@ -960,6 +980,7 @@ public class MainActivity extends Activity {
             active.setOnCheckedChangeListener((v, on) -> {
                 Json.put(s, "enabled", on);
                 db.saveSearch(s);
+                AutoChecks.targetsChanged(this, db);
             });
             box.addView(active);
             addButton(box, "Открыть поиск", () -> {
@@ -970,6 +991,7 @@ public class MainActivity extends Activity {
             });
             addButton(box, "Удалить поиск", () -> {
                 db.deleteSearch(s.optString("id"));
+                AutoChecks.targetsChanged(this, db);
                 render();
             });
             body.addView(box);
@@ -977,6 +999,7 @@ public class MainActivity extends Activity {
         addButton(body, "Добавить ссылку на объявление", () -> addUrl(""));
         addButton(body, "Добавить объект вручную", this::manual);
         addButton(body, "Источники и ход обхода", this::sourceStatus);
+        addButton(body, "Состояние автопроверки", this::automaticStatus);
         addButton(body, "Проверить вероятные дубли", this::duplicateCandidates);
         body.addView(
             text(
@@ -1032,7 +1055,7 @@ public class MainActivity extends Activity {
         );
         body.addView(
             text(
-                "DomTrack UA Android 0.1.0 · локальная версия\nКарты: © OpenStreetMap contributors",
+                "DomTrack UA Android 0.2.1 · локальная версия\nКарты: © OpenStreetMap contributors",
                 12,
                 MUTED
             )
@@ -1044,6 +1067,7 @@ public class MainActivity extends Activity {
         JSONObject settings = db.state("settings", new JSONObject());
         toggle(form, "Автоматические проверки каждые 15 минут", settings, "background", true);
         toggle(form, "Только Wi-Fi / безлимитная сеть", settings, "wifiOnly", false);
+        addButton(form, "Состояние автопроверки", this::automaticStatus);
         toggle(form, "Тихие часы: 23:00–08:00", settings, "quiet", true);
         for (int i = 0; i < Alerts.TYPES.length; i++) toggle(
             form,
@@ -1087,8 +1111,34 @@ public class MainActivity extends Activity {
             Json.put(settings, key, on);
             db.saveState("settings", settings);
             ((DomTrackApp) getApplication()).schedule();
+            AutoChecks.catchUpIfDue(this, db);
         });
         parent.addView(s);
+    }
+
+    private void automaticStatus() {
+        LinearLayout form = column();
+        TextView message = text("Получение состояния планировщика…", 14, INK);
+        form.addView(message);
+        Runnable refresh = () -> io.execute(() -> {
+            try {
+                String result = AutoCheckDiagnostics.read(this, db);
+                handler.post(() -> { if (!isFinishing()) message.setText(result); });
+            } catch (Exception e) {
+                handler.post(() -> message.setText(AutoChecks.summary(db)
+                    + "\nНе удалось прочитать состояние планировщика: " + Scanner.safe(e)));
+            }
+        });
+        addButton(form, "Обновить статус", refresh);
+        addButton(form, "Восстановить расписание", () -> {
+            AutoChecks.targetsChanged(this, db);
+            refresh.run();
+        });
+        addButton(form, "Настройки Android для DomTrack", () -> startActivity(
+            new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                Uri.parse("package:" + getPackageName()))));
+        dialog("Автоматические проверки", form).show();
+        refresh.run();
     }
 
     private void keyDialog() {
@@ -1380,19 +1430,18 @@ public class MainActivity extends Activity {
                 String encrypted = text;
                 handler.post(() ->
                     prompt("Пароль резервной копии", "", true, password ->
-                        async(
-                            () ->
-                                "Восстановлено записей: " +
-                                Backup.restore(
-                                    db,
-                                    Backup.decrypt(encrypted, password.toCharArray())
-                                )
-                        )
+                        async(() -> {
+                            int count = Backup.restore(db, Backup.decrypt(encrypted, password.toCharArray()));
+                            AutoChecks.targetsChanged(this, db);
+                            return "Восстановлено записей: " + count;
+                        })
                     )
                 );
                 return "Введи пароль копии";
             }
-            return "Импортировано записей: " + Backup.restore(db, object);
+            int count = Backup.restore(db, object);
+            AutoChecks.targetsChanged(this, db);
+            return "Импортировано записей: " + count;
         });
     }
 

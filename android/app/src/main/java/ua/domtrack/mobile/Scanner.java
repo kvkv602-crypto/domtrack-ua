@@ -16,6 +16,9 @@ final class Scanner {
     private final Database db;
     private final Network net = new Network();
     private final AtomicBoolean cancelled = new AtomicBoolean();
+    private JSONObject lastReport = new JSONObject();
+
+    JSONObject report() { return Json.copy(lastReport); }
 
     static JSONObject manualStart(JSONObject previous) {
         return previous.optBoolean("complete") ? Json.object("nextPage", 1) : Json.copy(previous);
@@ -55,10 +58,12 @@ final class Scanner {
 
     int scan(boolean deep, BooleanSupplier stop, Consumer<String> progress, JSONObject requested)
         throws Exception {
+        lastReport = new JSONObject();
         if (!BUSY.compareAndSet(false, true)) return 0;
         long started = System.currentTimeMillis();
         AtomicInteger pages = new AtomicInteger(),
-            imported = new AtomicInteger();
+            imported = new AtomicInteger(),
+            loadedPages = new AtomicInteger(), watchChecks = new AtomicInteger();
         List<String> failures = Collections.synchronizedList(new ArrayList<>());
         BooleanSupplier halted = () ->
             cancelled.get() || stop.getAsBoolean() || Thread.currentThread().isInterrupted();
@@ -75,11 +80,15 @@ final class Scanner {
                             r.optJSONObject("watch").optBoolean("enabled", true)
                     )
             ) return 0;
+            if (halted.getAsBoolean()) return 0;
             try {
                 Fx.get(db, net, Model.date());
             } catch (Exception e) {
                 failures.add("Курс НБУ недоступен; исходные цены сохранены");
             }
+            // Reserve a watch slot before slow catalogs can consume the whole short-run budget.
+            if (!deep && !halted.getAsBoolean()) watchChecks.set(checkWatches(
+                halted, failures, imported, started + 55000, 1));
             if (deep && !sections.isEmpty()) {
                 // Persist one cursor per catalog. An interrupted sweep resumes at its last committed page.
                 for (Sources.Section s : sections)
@@ -116,7 +125,9 @@ final class Scanner {
                                             );
                                             pages.incrementAndGet();
                                             imported.addAndGet(load(s, page, front));
+                                            loadedPages.incrementAndGet();
                                         } catch (Exception e) {
+                                            if (halted.getAsBoolean()) break;
                                             failed.add(s.key());
                                             failure(s, e, failures);
                                         }
@@ -145,7 +156,7 @@ final class Scanner {
                 boolean metered = context
                     .getSystemService(ConnectivityManager.class)
                     .isActiveNetworkMetered();
-                int budget = metered ? 2 : 4,
+                int budget = (metered ? 2 : 4) - Math.min(1, watchChecks.get()),
                     cursor = db.state("scanSchedule", new JSONObject()).optInt("cursor");
                 Set<String> failed = new HashSet<>();
                 while (
@@ -165,32 +176,34 @@ final class Scanner {
                     try {
                         pages.incrementAndGet();
                         imported.addAndGet(load(s, front ? 1 : state.optInt("nextPage", 1), front));
+                        loadedPages.incrementAndGet();
                     } catch (Exception e) {
+                        if (halted.getAsBoolean()) break;
                         failed.add(s.key());
                         failure(s, e, failures);
                     }
                     db.saveState("scanSchedule", Json.object("cursor", cursor));
                 }
             }
-            if (!halted.getAsBoolean()) checkWatches(
+            if (deep && !halted.getAsBoolean()) watchChecks.set(checkWatches(
                 halted,
                 failures,
                 imported,
-                deep ? Long.MAX_VALUE : started + 55000
-            );
+                Long.MAX_VALUE, 2
+            ));
             Alerts.deliver(context, db);
             boolean complete =
                 !sections.isEmpty() &&
                 sections.stream().allMatch(s -> state(s).optBoolean("complete"));
-            db.saveState(
-                "lastCheck",
-                Json.object(
+            lastReport = Json.object(
                     "at",
                     Model.now(),
                     "durationMs",
                     System.currentTimeMillis() - started,
                     "pages",
                     pages.get(),
+                    "loadedPages", loadedPages.get(),
+                    "watchChecks", watchChecks.get(),
                     "imported",
                     imported.get(),
                     "errors",
@@ -201,8 +214,14 @@ final class Scanner {
                     complete,
                     "mode",
                     deep ? "full" : "background"
-                )
-            );
+                );
+            if (loadedPages.get() == 0 && watchChecks.get() == 0 && failures.isEmpty()) {
+                long now = System.currentTimeMillis();
+                long retry = sections.stream().mapToLong(s -> state(s).optLong("retryAfter"))
+                    .filter(at -> at > now).min().orElse(0L);
+                Json.put(lastReport, "nextRetryAtMillis", retry);
+            }
+            db.saveState("lastCheck", lastReport);
             return imported.get();
         } finally {
             BUSY.set(false);
@@ -214,7 +233,7 @@ final class Scanner {
     }
 
     private void failure(Sources.Section s, Exception e, List<String> failures) {
-        if (cancelled.get()) return;
+        if (cancelled.get() || Thread.currentThread().isInterrupted()) return;
         JSONObject state = state(s);
         int n = state.optInt("failures") + 1;
         Json.put(state, "error", safe(e));
@@ -294,11 +313,11 @@ final class Scanner {
         return count;
     }
 
-    private void checkWatches(
+    private int checkWatches(
         BooleanSupplier stop,
         List<String> failures,
         AtomicInteger imported,
-        long until
+        long until, int limit
     ) {
         List<JSONObject> rows = db
             .listings()
@@ -310,12 +329,12 @@ final class Scanner {
             )
             .toList();
         int cursor = db.state("watchCursor", new JSONObject()).optInt("next"),
-            checked = 0;
+            checked = 0, successful = 0;
         Set<String> seen = new HashSet<>();
         for (
             int i = 0;
             i < rows.size() &&
-            checked < 2 &&
+            checked < limit &&
             !stop.getAsBoolean() &&
             System.currentTimeMillis() < until;
             i++
@@ -328,7 +347,10 @@ final class Scanner {
                     : r.optString("catalogUrl", r.optString("url"));
                 if (!seen.add(url)) continue;
                 checked++;
-                if (!net.robotsAllowed(url, db)) continue;
+                if (!net.robotsAllowed(url, db)) {
+                    failures.add("Наблюдение: robots.txt ограничивает загрузку");
+                    continue;
+                }
                 Network.Page response = net.get(url);
                 if (r.optBoolean("structured")) imported.addAndGet(
                     db.ingest(Sources.structured(response.body, response.url), false, true)
@@ -352,10 +374,13 @@ final class Scanner {
                         )
                     );
                 }
+                successful++;
             } catch (Exception e) {
+                if (stop.getAsBoolean() || Thread.currentThread().isInterrupted()) break;
                 failures.add("Наблюдение: " + safe(e));
             }
         }
+        return successful;
     }
 
     int coordinates(JSONObject filters, BooleanSupplier stop, Consumer<String> progress)
