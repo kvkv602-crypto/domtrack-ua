@@ -130,6 +130,8 @@ public class AutoCheckDeviceTest {
             long interval = second.optLong("lastSuccessAtMillis") - firstAt;
             assertTrue("The second automatic scan must respect the 15-minute interval", interval >= 900000L);
             assertTrue(second.optInt("loadedPages") > 0);
+            assertEquals("The screen-off repeat must come from the periodic job", "periodic", second.optString("trigger"));
+            assertFalse("The screen must stay off until the automatic repeat completes", device.isScreenOn());
             notice("AUTO_SECOND_CHECK intervalMs=" + interval + " pages=" + second.optInt("loadedPages"));
             db.saveState("automaticDeviceTest", Json.object("firstAt", first.optString("lastSuccessAt"),
                 "secondAt", second.optString("lastSuccessAt"), "intervalMs", interval,
