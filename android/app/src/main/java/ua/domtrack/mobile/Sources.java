@@ -680,7 +680,39 @@ final class Sources {
         if (graph != null) walkLd(graph, r, details);
     }
 
+    static List<JSONObject> importRecords(String html, String requestedUrl, String responseUrl) {
+        if (ListingLinks.olxHost(requestedUrl))
+            return List.of(OlxDetail.parse(html, requestedUrl, responseUrl, null));
+        List<JSONObject> rows = structured(html, responseUrl);
+        for (JSONObject row : rows) Json.put(row, "structured", true);
+        return rows;
+    }
+
+    static String watchUrl(JSONObject row) {
+        if (ListingLinks.olxWatch(row)) {
+            ListingLinks.Olx detail = ListingLinks.olx(row.optString("url"));
+            if (detail == null) throw new IllegalArgumentException("OLX: исходная ссылка объявления не подтверждена");
+            return detail.url;
+        }
+        return row.optBoolean("structured") ? row.optString("url") : row.optString("catalogUrl", row.optString("url"));
+    }
+
+    static List<JSONObject> watchRecords(String html, String responseUrl, JSONObject previous) {
+        List<JSONObject> rows;
+        if (ListingLinks.olxWatch(previous))
+            rows = List.of(OlxDetail.parse(html, previous.optString("url"), responseUrl, previous));
+        else if (previous.optBoolean("structured")) rows = structured(html, responseUrl);
+        else {
+            Section section = sections(previous.optString("city"), previous.optString("kind")).stream()
+                .filter(s -> s.source.equals(previous.optString("source"))).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Раздел наблюдаемого объявления не поддерживается"));
+            rows = parse(html, responseUrl, section, previous.optInt("catalogPage", 1)).records;
+        }
+        return List.of(ListingLinks.watched(rows, previous));
+    }
+
     static List<JSONObject> structured(String html, String url) {
+        if (ListingLinks.olxHost(url)) return List.of(OlxDetail.parse(html, url, url, null));
         Document doc = Jsoup.parse(html, url);
         List<JSONObject> out = new ArrayList<>(RiaPage.parse(doc, url));
         if (!out.isEmpty()) return out;

@@ -342,38 +342,15 @@ final class Scanner {
             JSONObject r = rows.get(Math.floorMod(cursor + i, rows.size()));
             db.saveState("watchCursor", Json.object("next", cursor + i + 1));
             try {
-                String url = r.optBoolean("structured")
-                    ? r.optString("url")
-                    : r.optString("catalogUrl", r.optString("url"));
-                if (!seen.add(url)) continue;
+                String url = Sources.watchUrl(r);
+                if (!seen.add(Model.identity(r))) continue;
                 checked++;
                 if (!net.robotsAllowed(url, db)) {
                     failures.add("Наблюдение: robots.txt ограничивает загрузку");
                     continue;
                 }
                 Network.Page response = net.get(url);
-                if (r.optBoolean("structured")) imported.addAndGet(
-                    db.ingest(Sources.structured(response.body, response.url), false, true)
-                );
-                else {
-                    Sources.Section s = Sources.sections(r.optString("city"), r.optString("kind"))
-                        .stream()
-                        .filter(x -> x.source.equals(r.optString("source")))
-                        .findFirst()
-                        .orElseThrow();
-                    imported.addAndGet(
-                        db.ingest(
-                            Sources.parse(
-                                response.body,
-                                response.url,
-                                s,
-                                r.optInt("catalogPage", 1)
-                            ).records,
-                            false,
-                            true
-                        )
-                    );
-                }
+                imported.addAndGet(db.ingest(Sources.watchRecords(response.body, response.url, r), false, true));
                 successful++;
             } catch (Exception e) {
                 if (stop.getAsBoolean() || Thread.currentThread().isInterrupted()) break;
@@ -411,8 +388,8 @@ final class Scanner {
         if (!net.robotsAllowed(url, db)) throw new IllegalArgumentException(
             "Источник ограничивает автоматическую загрузку"
         );
-        List<JSONObject> rows = Sources.structured(net.get(url).body, url);
-        for (JSONObject r : rows) Json.put(r, "structured", true);
+        Network.Page response = net.get(url);
+        List<JSONObject> rows = Sources.importRecords(response.body, url, response.url);
         return db.ingest(rows, false);
     }
 }

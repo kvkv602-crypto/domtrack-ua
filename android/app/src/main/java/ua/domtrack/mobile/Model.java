@@ -9,6 +9,8 @@ import org.json.*;
 
 final class Model {
 
+    private static final List<String> FACTS=List.of("title","address","district","rooms","area","floor","floorsTotal","sellerType","contactPhone","contactEmail","status","description","image");
+
     static final ZoneId KYIV = ZoneId.of("Europe/Kyiv");
 
     static String date() {
@@ -221,12 +223,13 @@ final class Model {
     ) {
         List<String> events = new ArrayList<>();
         if (old == null) return events;
-        boolean price =
+        boolean verified = verifiedPrice(old) && verifiedPrice(next);
+        boolean price = verified && (
             old.optDouble("price") != next.optDouble("price") ||
-            !old.optString("currency").equals(next.optString("currency"));
+            !old.optString("currency").equals(next.optString("currency")));
         if (price) events.add("price");
-        if (watched && !material(old).equals(material(next))) events.add("object");
-        if (watch != null && watch.has("target")) {
+        if (watched && knownFactsChanged(old,next)) events.add("object");
+        if (verified && watch != null && watch.has("target")) {
             double before = convert(
                     old.optDouble("price"),
                     old.optString("currency"),
@@ -248,5 +251,32 @@ final class Model {
             ) events.add("threshold");
         }
         return events;
+    }
+
+    static boolean verifiedPrice(JSONObject row) {
+        return row!=null && !"display".equals(row.optString("priceEvidence")) &&
+            !"coordinates".equals(row.optString("observationKind")) &&
+            Double.isFinite(row.optDouble("price",Double.NaN));
+    }
+
+    private static boolean known(Object value) {
+        return value!=null&&value!=JSONObject.NULL&&(!(value instanceof String)||!((String)value).isBlank()&&!value.equals("unknown"));
+    }
+
+    static void keepKnownFacts(JSONObject previous,JSONObject next) {
+        if(previous==null)return;
+        for(String key:FACTS)if(!known(next.opt(key))&&known(previous.opt(key)))Json.put(next,key,previous.opt(key));
+    }
+
+    private static boolean knownFactsChanged(JSONObject before,JSONObject after) {
+        for(String key:FACTS) {
+            // CDN resizing/transport URLs do not prove a change in the property.
+            if(key.equals("image"))continue;
+            Object a=before.opt(key),b=after.opt(key);
+            if(!known(a)||!known(b))continue;
+            if(a instanceof Number&&b instanceof Number) { if(Double.compare(((Number)a).doubleValue(),((Number)b).doubleValue())!=0)return true; }
+            else if(!Objects.equals(a,b))return true;
+        }
+        return false;
     }
 }

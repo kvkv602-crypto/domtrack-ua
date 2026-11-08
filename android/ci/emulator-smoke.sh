@@ -91,7 +91,7 @@ try:
     capture('02-filters')
     adb('shell', 'input', 'keyevent', '4')
     time.sleep(1)
-    for label, name in [('Избранное','03-favorites'),('События','04-events'),('Ещё','05-more'),('Поиск','06-search-again')]:
+    for label, name in [('Избранное','03-favorites'),('Слежение','04-tracking'),('Ещё','05-more'),('Поиск','06-search-again')]:
         tap(label)
         capture(name)
     # Exercise the real automatic Worker before any manual Search-button test.
@@ -117,6 +117,13 @@ try:
     if result.returncode != 0 or 'FAILURES!!!' in output or 'INSTRUMENTATION_FAILED' in output or 'OK (' not in output:
         raise AssertionError('Device tests failed: ' + output[-10000:])
     (out / '07-native-map.png').write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/map-native.png'))
+    combined = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.CombinedWorkspaceDeviceTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=180)
+    combined_output = combined.stdout.decode(errors='replace') + combined.stderr.decode(errors='replace')
+    (out / 'COMBINED-WORKSPACE.txt').write_text(combined_output)
+    if combined.returncode != 0 or 'FAILURES!!!' in combined_output or 'INSTRUMENTATION_FAILED' in combined_output or 'OK (' not in combined_output:
+        raise AssertionError('Combined workspace device tests failed: ' + combined_output[-10000:])
+    for image in ['combined-favorites.png','combined-tracking.png']:
+        (out / image).write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/'+image))
     # Reopen the Activity after the test switched off the screen; ensure cached EUR results are visible.
     adb('shell','input','keyevent','82')
     adb('shell','wm','dismiss-keyguard')
@@ -144,7 +151,7 @@ try:
         row = db.execute("SELECT data FROM state WHERE name='lastCheck'").fetchone()
         last = json.loads(row[0]) if row else {}
         extra = {}
-        for name in ['aiDeviceTest','screenOffTest','newSourcesTest','mapDeviceTest','automaticDeviceTest']:
+        for name in ['aiDeviceTest','screenOffTest','newSourcesTest','mapDeviceTest','automaticDeviceTest','combinedWorkspaceDeviceTest']:
             row = db.execute('SELECT data FROM state WHERE name=?',(name,)).fetchone()
             extra[name] = json.loads(row[0]) if row else {}
     (out / 'DEVICE-CHECKS.json').write_text(json.dumps(extra,indent=2))

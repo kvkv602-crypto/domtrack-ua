@@ -29,6 +29,8 @@ public class MainActivity extends Activity {
     private TextView status;
     private JSONObject filters;
     private String tab = "Поиск";
+    private String activeSavedSearchId = "";
+    private boolean favoriteMapOpened;
     private int visibleCount = 30;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final AtomicBoolean stopped = new AtomicBoolean();
@@ -50,7 +52,12 @@ public class MainActivity extends Activity {
             "currentFilters",
             Json.object("city", "Запоріжжя", "kind", "both", "currency", "EUR")
         );
-        if (state != null) pendingPhotoListing = state.getString("pendingPhotoListing");
+        if (state != null) {
+            pendingPhotoListing = state.getString("pendingPhotoListing");
+            activeSavedSearchId=state.getString("activeSavedSearchId","");
+            favoriteMapOpened=state.getBoolean("favoriteMapOpened");
+            tab=state.getString("workspaceTab","Поиск");
+        }
         build();
         handleIntent(getIntent());
     }
@@ -216,8 +223,9 @@ public class MainActivity extends Activity {
         scroll.addView(body);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1));
         nav = row();
-        for (String name : List.of("Поиск", "Избранное", "События", "Ещё")) {
+        for (String name : List.of("Поиск", "Карта", "Избранное", "Слежение", "Ещё")) {
             Button b = button(name, () -> {
+                if (name.equals("Карта")) { map(); return; }
                 tab = name;
                 visibleCount = 30;
                 render();
@@ -233,6 +241,13 @@ public class MainActivity extends Activity {
 
     private void render() {
         if (body == null || isFinishing()) return;
+        if (nav != null) for (int i=0;i<nav.getChildCount();i++) {
+            Button item=(Button)nav.getChildAt(i);
+            boolean selected=item.getText().toString().equals(tab)||(tab.equals("События")&&item.getText().toString().equals("Слежение"));
+            item.setTypeface(null,selected?Typeface.BOLD:Typeface.NORMAL);
+            item.setTextColor(selected?Color.WHITE:GREEN);
+            item.setBackgroundTintList(android.content.res.ColorStateList.valueOf(selected?GREEN:Color.rgb(235,244,240)));
+        }
         body.removeAllViews();
         switch (tab) {
             case "Избранное":
@@ -240,6 +255,9 @@ public class MainActivity extends Activity {
                 break;
             case "События":
                 showEvents();
+                break;
+            case "Слежение":
+                showTracking();
                 break;
             case "Ещё":
                 showMore();
@@ -276,14 +294,14 @@ public class MainActivity extends Activity {
     private void showListings(boolean favorites) {
         LinearLayout actions = row();
         actions.addView(
-            button("Фильтры", this::filterDialog),
+            button(favorites?"К поиску":"Фильтры", ()->{if(favorites){tab="Поиск";render();}else filterDialog();}),
             new LinearLayout.LayoutParams(0, -2, 1)
         );
-        actions.addView(button("Карта", this::map), new LinearLayout.LayoutParams(0, -2, 1));
+        actions.addView(button("Карта", () -> map(favorites)), new LinearLayout.LayoutParams(0, -2, 1));
         body.addView(actions);
         body.addView(
             text(
-                filters.optString("city") +
+                favorites?"Избранное · все города и бюджеты":filters.optString("city") +
                     " · " +
                     (filters.optString("kind").equals("house")
                             ? "дома"
@@ -314,11 +332,22 @@ public class MainActivity extends Activity {
                 new LinearLayout.LayoutParams(0, -2, 1)
             );
             body.addView(scan);
-            addButton(body, "Сохранить поиск и включить наблюдение", this::saveSearch);
+            addButton(body, activeSavedSearchId.isBlank()?"Сохранить поиск и включить наблюдение":"Сохранить изменения поиска", this::saveSearch);
+            ArrayList<JSONObject> sections=new ArrayList<>();
+            for (Sources.Section section:Sources.sections(filters.optString("city"),filters.optString("kind","both"))) {
+                JSONObject state=Json.copy(db.state("section:"+section.key(),new JSONObject()));
+                Json.put(state,"source",section.source);sections.add(state);
+            }
+            TextView coverage=text(Workspace.coverage(sections)+"\nЗагруженная подборка; охват всех объявлений не подтверждён.",12,MUTED);
+            coverage.setOnClickListener(v->sourceStatus());body.addView(coverage);
         }
+        LinearLayout ordering=row();
+        String order=Workspace.sort(db.state("ui",new JSONObject()));
+        ordering.addView(button((order.equals("price")?"✓ ":"")+"Дешевле",()->setSort("price")),new LinearLayout.LayoutParams(0,-2,1));
+        ordering.addView(button((order.equals("newest")?"✓ ":"")+"Новые сначала",()->setSort("newest")),new LinearLayout.LayoutParams(0,-2,1));
+        body.addView(ordering);
         List<JSONObject> rows = new ArrayList<>();
-        JSONObject f = Json.copy(filters);
-        if (favorites) Json.put(f, "favorite", true);
+        JSONObject f = Workspace.resultFilters(filters,favorites);
         for (JSONObject r : db.listings())
             if (!r.optBoolean("hidden") && Model.matches(r, f, quote())) rows.add(r);
         rows = SemanticIndex.display(
@@ -327,7 +356,7 @@ public class MainActivity extends Activity {
             filters.optString("currency", "EUR"),
             db.state("duplicateIndex", new JSONObject())
         );
-        String sort = db.state("ui", new JSONObject()).optString("sort", "price");
+        String sort = Workspace.sort(db.state("ui", new JSONObject()));
         if (sort.equals("price")) rows.sort(
             Comparator.comparingDouble(r -> {
                 double p = Model.convert(
@@ -361,6 +390,7 @@ public class MainActivity extends Activity {
             box.addView(p);
             box.addView(text(r.optString("title"), 17, INK));
             box.addView(text(spec(r), 13, MUTED));
+            if (!Model.verifiedPrice(r)) box.addView(text("Цена показана площадкой · исходная валюта продавца не подтверждена",11,MUTED));
             if (r.has("probableAlternatives")) {
                 box.addView(
                     text(
@@ -449,13 +479,14 @@ public class MainActivity extends Activity {
         s.add(r.optString("kind").equals("house") ? "Дом" : "Квартира");
         if (r.has("rooms")) s.add(r.optInt("rooms") + " комн.");
         if (r.has("area")) s.add(r.optDouble("area") + " м²");
-        if (r.has("floor")) s.add(
-            "этаж " +
-                r.optInt("floor") +
-                (r.has("floorsTotal") ? "/" + r.optInt("floorsTotal") : "")
-        );
+        if (r.has("floor")) s.add("Этаж: " + r.optInt("floor"));
+        if (r.has("floorsTotal")) s.add("Этажей в доме: " + r.optInt("floorsTotal"));
         if (!r.optString("district").isBlank()) s.add(r.optString("district"));
         return String.join(" · ", s);
+    }
+
+    private void setSort(String sort) {
+        JSONObject ui=db.state("ui",new JSONObject());Json.put(ui,"sort",sort);db.saveState("ui",ui);visibleCount=30;render();
     }
 
     private String shortDate(String value) {
@@ -658,23 +689,27 @@ public class MainActivity extends Activity {
     }
 
     private void saveSearch() {
+        JSONObject editing=db.searches().stream().filter(s->s.optString("id").equals(activeSavedSearchId)).findFirst().orElse(null);
+        if (editing!=null) {
+            new AlertDialog.Builder(this).setTitle("Сохранённый поиск").setItems(new String[]{"Обновить «"+editing.optString("name")+"»","Сохранить отдельную копию"},(d,index)->saveSearch(index==0?editing:null)).setNegativeButton("Отмена",null).show();
+            return;
+        }
+        saveSearch(null);
+    }
+
+    private void saveSearch(JSONObject editing) {
         prompt(
             "Название поиска",
-            filters.optString("city") + " · " + filters.optString("currency"),
+            editing==null?filters.optString("city") + " · " + filters.optString("currency"):editing.optString("name"),
             false,
             name -> {
-                JSONObject saved = Json.object(
-                    "name",
-                    name,
-                    "enabled",
-                    true,
-                    "filters",
-                    Json.copy(filters)
-                );
+                JSONObject saved = Workspace.savedSearch(editing,name,filters);
                 db.saveSearch(saved);
+                activeSavedSearchId=saved.optString("id");
                 AutoChecks.targetsChanged(this, db);
                 requestNotifications();
                 toast("Поиск сохранён. Уведомления появятся после обнаружения новых изменений.");
+                render();
             }
         );
     }
@@ -748,6 +783,7 @@ public class MainActivity extends Activity {
         content.addView(heading(price(r)));
         content.addView(text(r.optString("title"), 19, INK));
         content.addView(text(spec(r) + "\n" + r.optString("address"), 15, MUTED));
+        if (!Model.verifiedPrice(r)) content.addView(text("Это отображаемая цена площадки. Она сохраняется в истории, но не подтверждает изменение исходной цены продавца; уведомления о снижении и пороге по ней не создаются.",13,MUTED));
         content.addView(
             text(
                 "Источник: " +
@@ -761,6 +797,7 @@ public class MainActivity extends Activity {
             )
         );
         addButton(content, "Открыть исходное объявление", () -> open(r.optString("url")));
+        addButton(content,"Поделиться объявлением",()->shareListing(r));
         if (!r.optString("contactPhone").isBlank()) addButton(
             content,
             "Позвонить: " + r.optString("contactPhone"),
@@ -790,10 +827,7 @@ public class MainActivity extends Activity {
         enabled.setText("Следить за изменениями объекта");
         enabled.setChecked(watch != null && watch.optBoolean("enabled", true));
         enabled.setOnCheckedChangeListener((v, on) -> {
-            JSONObject w = watch == null ? new JSONObject() : Json.copy(watch);
-            Json.put(w, "enabled", on);
-            db.local(id, "watch", w);
-            AutoChecks.targetsChanged(this, db);
+            setWatchEnabled(id,on);
             if (on) requestNotifications();
         });
         content.addView(enabled);
@@ -890,14 +924,15 @@ public class MainActivity extends Activity {
 
     private void threshold(String id, JSONObject r) {
         LinearLayout form = column();
-        JSONObject current = r.optJSONObject("watch");
+        JSONObject latest=db.get(id);
+        JSONObject current = (latest==null?r:latest).optJSONObject("watch");
         EditText target = input(
             form,
             "Оповестить, когда цена будет не выше",
             current == null ? "" : current.optString("target"),
             true
         );
-        Spinner currency = select(form, "Валюта порога", new String[] { "EUR", "USD", "UAH" }, 0);
+        Spinner currency = select(form, "Валюта порога", new String[] { "EUR", "USD", "UAH" }, Workspace.watchCurrencyIndex(current));
         AlertDialog d = dialog("Порог цены", form);
         d.setButton(-1, "Сохранить", (a, b) -> {});
         d.show();
@@ -925,6 +960,7 @@ public class MainActivity extends Activity {
                     AutoChecks.targetsChanged(this, db);
                     d.dismiss();
                     toast("Порог сохранён");
+                    render();
                 } catch (Exception e) {
                     toast("Проверь цену порога");
                 }
@@ -969,8 +1005,44 @@ public class MainActivity extends Activity {
         dialog("Сравнение объектов", content).show();
     }
 
-    private void showMore() {
-        body.addView(heading("Поиски и настройки"));
+    private void setWatchEnabled(String id,boolean enabled) {
+        JSONObject latest=db.get(id);if(latest==null)return;
+        JSONObject current=latest.optJSONObject("watch");
+        JSONObject next=current==null?new JSONObject():Json.copy(current);
+        Json.put(next,"enabled",enabled);db.local(id,"watch",next);AutoChecks.targetsChanged(this,db);
+    }
+
+    private void showTracking() {
+        body.addView(heading("Слежение"));
+        body.addView(text(AutoChecks.summary(db),13,MUTED));
+        addButton(body,"Состояние автопроверки",this::automaticStatus);
+        addButton(body,"События и изменения",()->{tab="События";render();});
+        body.addView(heading("Наблюдаемые объекты"));
+        int count=0;
+        for(JSONObject r:db.listings()) {
+            JSONObject watch=r.optJSONObject("watch");
+            if(watch==null)continue;
+            count++;
+            LinearLayout box=card();
+            box.addView(text(r.optString("title"),17,INK));
+            box.addView(text(price(r)+" · "+r.optString("city"),16,GREEN));
+            box.addView(text(spec(r),12,MUTED));
+            if(watch.has("target"))box.addView(text("Порог: "+fmt(watch.optDouble("target"))+" "+watch.optString("currency","EUR"),13,INK));
+            if(!Model.verifiedPrice(r))box.addView(text("Цена отображаемая: подтверждённый сигнал о снижении или пороге по ней не создаётся.",12,MUTED));
+            Switch active=new Switch(this);active.setText("Проверять объект");active.setChecked(watch.optBoolean("enabled",true));
+            active.setOnCheckedChangeListener((v,on)->setWatchEnabled(r.optString("id"),on));
+            box.addView(active);
+            addButton(box,"Открыть объект",()->detail(r.optString("id")));
+            addButton(box,"Изменить порог",()->threshold(r.optString("id"),db.get(r.optString("id"))));
+            body.addView(box);
+        }
+        if(count==0)body.addView(text("В карточке интересующего объекта включи «Следить за изменениями объекта» или задай порог цены.",14,MUTED));
+        body.addView(heading("Сохранённые поиски"));
+        showSavedSearches();
+    }
+
+    private void showSavedSearches() {
+        if(db.searches().isEmpty())body.addView(text("Сохрани параметры на вкладке «Поиск», чтобы получать новые подходящие объекты.",14,MUTED));
         for (JSONObject s : db.searches()) {
             LinearLayout box = card();
             box.addView(text(s.optString("name"), 17, INK));
@@ -984,18 +1056,28 @@ public class MainActivity extends Activity {
             });
             box.addView(active);
             addButton(box, "Открыть поиск", () -> {
+                activeSavedSearchId=s.optString("id");
                 filters = Json.copy(s.optJSONObject("filters"));
                 db.saveState("currentFilters", filters);
                 tab = "Поиск";
                 render();
             });
+            addButton(box,"Изменить фильтры и название",()->{
+                activeSavedSearchId=s.optString("id");filters=Json.copy(s.optJSONObject("filters"));db.saveState("currentFilters",filters);tab="Поиск";render();filterDialog();
+            });
             addButton(box, "Удалить поиск", () -> {
                 db.deleteSearch(s.optString("id"));
+                if(activeSavedSearchId.equals(s.optString("id")))activeSavedSearchId="";
                 AutoChecks.targetsChanged(this, db);
                 render();
             });
             body.addView(box);
         }
+    }
+
+    private void showMore() {
+        body.addView(heading("Инструменты и настройки"));
+        addButton(body,"Сохранённые поиски и слежение",()->{tab="Слежение";render();});
         addButton(body, "Добавить ссылку на объявление", () -> addUrl(""));
         addButton(body, "Добавить объект вручную", this::manual);
         addButton(body, "Источники и ход обхода", this::sourceStatus);
@@ -1292,11 +1374,22 @@ public class MainActivity extends Activity {
             });
     }
 
-    private void map() {
+    private void map() { map(false); }
+
+    private void map(boolean favorites) {
+        favoriteMapOpened=favorites;
         startActivityForResult(
-            new Intent(this, MapActivity.class).putExtra("filters", filters.toString()),
+            new Intent(this, MapActivity.class).putExtra("filters", Workspace.resultFilters(filters,favorites).toString()),
             24
         );
+    }
+
+    private void shareListing(JSONObject listing) {
+        try {
+            String url=listing.optString("url");Network.safe(url);
+            String value=listing.optString("title")+"\n"+fmt(listing.optDouble("price"))+" "+listing.optString("currency")+"\n"+listing.optString("city")+" · "+spec(listing)+"\n"+url;
+            startActivity(Intent.createChooser(new Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT,value),"Поделиться объявлением"));
+        } catch(Exception error) { toast("Исходная ссылка недоступна для отправки"); }
     }
 
     private String asset(String name) throws IOException {
@@ -1372,13 +1465,14 @@ public class MainActivity extends Activity {
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
         if (request == 24 && result == RESULT_OK && data != null) {
-            filters = Json.obj(data.getStringExtra("filters"));
-            db.saveState("currentFilters", filters);
+            if(!favoriteMapOpened){filters = Json.obj(data.getStringExtra("filters"));db.saveState("currentFilters", filters);}
+            favoriteMapOpened=false;
             render();
             String id = data.getStringExtra("listingId");
             if (id != null) detail(id);
             return;
         }
+        if(request==24)favoriteMapOpened=false;
         if (result != RESULT_OK || data == null || data.getData() == null) return;
         Uri uri = data.getData();
         if (request == 23) {
@@ -1694,6 +1788,9 @@ public class MainActivity extends Activity {
     protected void onSaveInstanceState(Bundle state) {
         super.onSaveInstanceState(state);
         state.putString("pendingPhotoListing", pendingPhotoListing);
+        state.putString("activeSavedSearchId",activeSavedSearchId);
+        state.putBoolean("favoriteMapOpened",favoriteMapOpened);
+        state.putString("workspaceTab",tab);
     }
 
     private void visitTools(LinearLayout content, JSONObject r) {

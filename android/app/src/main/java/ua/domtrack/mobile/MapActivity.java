@@ -11,7 +11,9 @@ import java.util.*;
 import org.json.*;
 import org.maplibre.android.MapLibre;
 import org.maplibre.android.camera.CameraPosition;
+import org.maplibre.android.camera.CameraUpdateFactory;
 import org.maplibre.android.geometry.LatLng;
+import org.maplibre.android.geometry.LatLngBounds;
 import org.maplibre.android.maps.*;
 
 /** Native vector map with a touch drawing layer; no JavaScript or embedded web page. */
@@ -30,13 +32,14 @@ public class MapActivity extends Activity {
     private final java.util.concurrent.ExecutorService markerIo =
         java.util.concurrent.Executors.newSingleThreadExecutor();
     private boolean active;
+    private boolean globalCameraFramed, userMovedCamera;
     private final Runnable refresh = new Runnable() {
         public void run() {
             if (!active) return;
             markerIo.execute(() -> {
                 Database db = ((DomTrackApp) getApplication()).db();
                 JSONObject quote = db.state("fx:" + Model.date(), new JSONObject()),
-                    f = Json.copy(filters);
+                    f = MapFilters.candidates(filters);
 
                 ArrayList<JSONObject> rows = new ArrayList<>();
                 int missing = 0;
@@ -71,6 +74,7 @@ public class MapActivity extends Activity {
                             without +
                             "\n© OpenFreeMap · OpenMapTiles · OpenStreetMap"
                     );
+                    frameGlobalCandidates();
                     drawing.invalidate();
                     refreshHandler.postDelayed(this, 7000);
                 });
@@ -89,6 +93,10 @@ public class MapActivity extends Activity {
         filters = Json.obj(
             state == null ? getIntent().getStringExtra("filters") : state.getString("filters")
         );
+        if (state != null) {
+            globalCameraFramed = state.getBoolean("globalCameraFramed");
+            userMovedCamera = state.getBoolean("userMovedCamera");
+        }
         JSONArray polygon = state == null
             ? filters.optJSONArray("polygon")
             : Json.obj(state.getString("shape", "{}")).optJSONArray("polygon");
@@ -106,7 +114,8 @@ public class MapActivity extends Activity {
             return insets;
         });
         TextView title = new TextView(this);
-        title.setText("Территория поиска · " + filters.optString("city"));
+        title.setText("Территория поиска · " +
+            (filters.optString("city").isBlank() ? "Все города" : filters.optString("city")));
         title.setTextSize(20);
         title.setPadding(dp(12), dp(8), dp(12), dp(4));
         root.addView(title);
@@ -151,6 +160,8 @@ public class MapActivity extends Activity {
         view = new MapView(this);
         view.onCreate(state);
         frame.addView(view, new FrameLayout.LayoutParams(-1, -1));
+        view.addOnLayoutChangeListener((v, left, top, right, bottomEdge, oldLeft, oldTop, oldRight, oldBottom) ->
+            frameGlobalCandidates());
         drawing = new Drawing();
         frame.addView(drawing, new FrameLayout.LayoutParams(-1, -1));
         root.addView(frame, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -180,7 +191,7 @@ public class MapActivity extends Activity {
         setContentView(root);
         Database db = ((DomTrackApp) getApplication()).db();
         mapQuote = db.state("fx:" + Model.date(), new JSONObject());
-        JSONObject noZone = Json.copy(filters);
+        JSONObject noZone = MapFilters.candidates(filters);
 
         int missing = 0;
         for (JSONObject r : db.listings())
@@ -208,10 +219,16 @@ public class MapActivity extends Activity {
             map.getUiSettings().setRotateGesturesEnabled(false);
             map.getUiSettings().setTiltGesturesEnabled(false);
             map.addOnCameraMoveListener(() -> drawing.invalidate());
-            LatLng center = zone.isEmpty() ? cityCenter(filters.optString("city")) : zone.get(0);
-            map.setCameraPosition(new CameraPosition.Builder().target(center).zoom(12).build());
+            map.addOnCameraMoveStartedListener(reason -> {
+                if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) userMovedCamera = true;
+            });
+            if (!filters.optString("city").isBlank() || !zone.isEmpty()) {
+                LatLng center = zone.isEmpty() ? cityCenter(filters.optString("city")) : zone.get(0);
+                map.setCameraPosition(new CameraPosition.Builder().target(center).zoom(12).build());
+            }
             map.setStyle("https://tiles.openfreemap.org/styles/liberty", style -> {
                 loaded = true;
+                view.post(this::frameGlobalCandidates);
                 updateHint();
                 drawing.invalidate();
             });
@@ -219,17 +236,42 @@ public class MapActivity extends Activity {
                 hint.setText("Карта не загрузилась. Проверь интернет и открой карту снова.")
             );
             updateHint();
-            TextView attribution = new TextView(this);
-            attribution.setText(
+            coverage = new TextView(this);
+            coverage.setText(
                 "Координаты площадок: " +
                     listings.size() +
                     " · без координат: " +
                     without +
                     "\n© OpenFreeMap · OpenMapTiles · OpenStreetMap"
             );
-            attribution.setTextSize(11);
-            root.addView(attribution);
+            coverage.setTextSize(11);
+            root.addView(coverage);
         });
+    }
+
+    private void frameGlobalCandidates() {
+        if (!loaded || map == null || view.getWidth() == 0 || view.getHeight() == 0 ||
+            !filters.optString("city").isBlank() || !zone.isEmpty() ||
+            globalCameraFramed || userMovedCamera) return;
+        if (listings.isEmpty()) {
+            // Keep the overview until coordinates arrive; do not create substitute markers.
+            map.moveCamera(CameraUpdateFactory.newLatLngBounds(new LatLngBounds.Builder()
+                .include(new LatLng(44, 22)).include(new LatLng(52.5, 40.5)).build(), dp(32)));
+            return;
+        }
+        LatLng first = new LatLng(listings.get(0).optDouble("latitude"), listings.get(0).optDouble("longitude"));
+        LatLngBounds.Builder bounds = new LatLngBounds.Builder();
+        boolean differentPosition = false;
+        for (JSONObject record : listings) {
+            LatLng point = new LatLng(record.optDouble("latitude"), record.optDouble("longitude"));
+            bounds.include(point);
+            if (point.getLatitude() != first.getLatitude() || point.getLongitude() != first.getLongitude()) {
+                differentPosition = true;
+            }
+        }
+        if (differentPosition) map.moveCamera(CameraUpdateFactory.newLatLngBounds(bounds.build(), dp(48)));
+        else map.setCameraPosition(new CameraPosition.Builder().target(first).zoom(12).build());
+        globalCameraFramed = true;
     }
 
     private Button button(String label, Runnable action) {
@@ -559,5 +601,7 @@ public class MapActivity extends Activity {
         view.onSaveInstanceState(b);
         b.putString("filters", filters.toString());
         b.putString("shape", Json.object("polygon", polygon()).toString());
+        b.putBoolean("globalCameraFramed", globalCameraFramed);
+        b.putBoolean("userMovedCamera", userMovedCamera);
     }
 }

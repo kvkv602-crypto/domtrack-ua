@@ -241,6 +241,7 @@ final class Database extends SQLiteOpenHelper {
                     if (old.has(key)) Json.put(r, key, old.opt(key));
                 if (old != null) for (String extra : List.of(
                     "structured",
+                    "priceEvidence",
                     "catalogUrl",
                     "catalogPage",
                     "latitude",
@@ -249,6 +250,7 @@ final class Database extends SQLiteOpenHelper {
                     "coordinatesCheckedAt"
                 ))
                     if (!r.has(extra) && old.has(extra)) Json.put(r, extra, old.opt(extra));
+                Model.keepKnownFacts(old,r);
                 boolean changed =
                     old == null ||
                     old.optDouble("price") != r.optDouble("price") ||

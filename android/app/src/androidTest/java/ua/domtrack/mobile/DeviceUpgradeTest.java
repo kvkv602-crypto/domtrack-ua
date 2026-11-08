@@ -126,7 +126,14 @@ public class DeviceUpgradeTest {
             "observedAt",
             Model.now()
         );
-        db.ingest(List.of(synthetic), false);
+        JSONObject outside = Json.copy(synthetic);
+        Json.put(outside, "url", "https://example.org/synthetic-map-outside");
+        Json.put(outside, "longitude", 35.15);
+        List<JSONObject> syntheticRows = new ArrayList<>(List.of(synthetic, outside));
+        JSONArray previousTerritory = new JSONArray(
+            "[[47.8386,35.1394],[47.8390,35.1394],[47.8390,35.1398],[47.8386,35.1398]]"
+        );
+        db.ingest(syntheticRows, false);
         MapActivity activity = (MapActivity) instrumentation.startActivitySync(
             new Intent(c, MapActivity.class)
                 .putExtra(
@@ -137,7 +144,11 @@ public class DeviceUpgradeTest {
                         "kind",
                         "apartment",
                         "currency",
-                        "USD"
+                        "USD",
+                        "query",
+                        "Тест карты",
+                        "polygon",
+                        previousTerritory
                     ).toString()
                 )
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -156,6 +167,43 @@ public class DeviceUpgradeTest {
                 Thread.sleep(500);
             }
             assertTrue("Native vector map did not load", ready);
+            java.lang.reflect.Field rowsField = MapActivity.class.getDeclaredField("listings"),
+                coverageField = MapActivity.class.getDeclaredField("coverage"),
+                filtersField = MapActivity.class.getDeclaredField("filters"),
+                refreshField = MapActivity.class.getDeclaredField("refresh");
+            rowsField.setAccessible(true);
+            coverageField.setAccessible(true);
+            filtersField.setAccessible(true);
+            refreshField.setAccessible(true);
+            android.widget.TextView coverage = (android.widget.TextView) coverageField.get(activity);
+            assertNotNull("Coverage must remain attached for later refreshes", coverage);
+            instrumentation.runOnMainSync(() -> {
+                assertEquals("The old territory must not hide candidates while editing", 2,
+                    ((List<?>) readField(rowsField, activity)).size());
+                assertNotNull(coverage.getParent());
+                assertTrue(coverage.getText().toString().contains("Координаты площадок: 2 · без координат: 0"));
+            });
+            JSONObject added = Json.copy(synthetic), missing = Json.copy(synthetic);
+            Json.put(added, "url", "https://example.org/synthetic-map-refresh");
+            Json.put(added, "longitude", 35.16);
+            Json.put(missing, "url", "https://example.org/synthetic-map-missing");
+            missing.remove("latitude");
+            missing.remove("longitude");
+            syntheticRows.add(added);
+            syntheticRows.add(missing);
+            db.ingest(List.of(added, missing), false);
+            instrumentation.runOnMainSync((Runnable) refreshField.get(activity));
+            java.util.concurrent.atomic.AtomicBoolean refreshed = new java.util.concurrent.atomic.AtomicBoolean();
+            deadline = System.currentTimeMillis() + 15000;
+            while (!refreshed.get() && System.currentTimeMillis() < deadline) {
+                instrumentation.runOnMainSync(() -> refreshed.set(
+                    coverage.getText().toString().contains("Координаты площадок: 3 · без координат: 1")
+                ));
+                Thread.sleep(100);
+            }
+            assertTrue("The same visible coverage view must update after the candidate refresh", refreshed.get());
+            instrumentation.runOnMainSync(() -> assertEquals(3,
+                ((List<?>) readField(rowsField, activity)).size()));
             java.lang.reflect.Field mapField = MapActivity.class.getDeclaredField("map"),
                 viewField = MapActivity.class.getDeclaredField("view");
             mapField.setAccessible(true);
@@ -192,7 +240,8 @@ public class DeviceUpgradeTest {
             Thread.sleep(1500);
             db.saveState(
                 "mapDeviceTest",
-                Json.object("renderedFeatures", rendered.get(), "priceMarker", true)
+                Json.object("renderedFeatures", rendered.get(), "priceMarker", true,
+                    "allMapCandidates", true, "refreshedCoverage", true)
             );
             assertTrue(device.takeScreenshot(new java.io.File(c.getFilesDir(), "map-native.png")));
             device
@@ -219,18 +268,158 @@ public class DeviceUpgradeTest {
                 4,
                 ((List<?>) field.get(activity)).size()
             );
+            assertEquals("Drawing must not replace the saved search before Apply",
+                previousTerritory.toString(),
+                ((JSONObject) filtersField.get(activity)).getJSONArray("polygon").toString());
             device.findObject(new androidx.test.uiautomator.UiSelector().text("Применить")).click();
             Thread.sleep(500);
             assertTrue("Polygon could not be applied", activity.isFinishing());
+            JSONObject applied = (JSONObject) filtersField.get(activity);
+            assertEquals("Тест карты", applied.getString("query"));
+            assertEquals("Запоріжжя", applied.getString("city"));
+            assertEquals("USD", applied.getString("currency"));
+            assertTrue(Geometry.valid(applied.getJSONArray("polygon")));
+            assertNotEquals(previousTerritory.toString(), applied.getJSONArray("polygon").toString());
         } finally {
             instrumentation.runOnMainSync(activity::finish);
-            db
-                .getWritableDatabase()
-                .delete("history", "listing=?", new String[] { Model.identity(synthetic) });
-            db
-                .getWritableDatabase()
-                .delete("listing", "id=?", new String[] { Model.identity(synthetic) });
+            for (JSONObject row : syntheticRows) {
+                db.getWritableDatabase().delete("history", "listing=?", new String[] { Model.identity(row) });
+                db.getWritableDatabase().delete("listing", "id=?", new String[] { Model.identity(row) });
+            }
         }
+    }
+
+    private static Object readField(java.lang.reflect.Field field, Object target) {
+        try {
+            return field.get(target);
+        } catch (IllegalAccessException e) {
+            throw new AssertionError(e);
+        }
+    }
+
+    @Test
+    public void test03bGlobalFavoriteMapFramesActualCoordinatesAndKeepsUserCamera() throws Exception {
+        Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        Context c = context();
+        Database db = ((DomTrackApp) c.getApplicationContext()).db();
+        String query = "Глобальна перевірка карти";
+        JSONObject lviv = Json.object(
+            "url", "https://example.org/global-map-lviv", "title", query,
+            "city", "Львів", "kind", "apartment", "deal", "sale",
+            "price", 13000, "currency", "USD", "latitude", 49.8397, "longitude", 24.0297
+        );
+        JSONObject zaporizhzhia = Json.copy(lviv);
+        Json.put(zaporizhzhia, "url", "https://example.org/global-map-zaporizhzhia");
+        Json.put(zaporizhzhia, "city", "Запоріжжя");
+        Json.put(zaporizhzhia, "latitude", 47.8388);
+        Json.put(zaporizhzhia, "longitude", 35.1396);
+        MapActivity activity = null;
+        try {
+            activity = startGlobalMap(c, query);
+            awaitVisibleCoordinates(activity, new double[][] { { 44.1, 22.1 }, { 52.4, 40.4 } });
+            java.lang.reflect.Field rows = MapActivity.class.getDeclaredField("listings");
+            rows.setAccessible(true);
+            MapActivity emptyMap = activity;
+            instrumentation.runOnMainSync(() -> assertEquals("Empty map must not invent pins", 0,
+                ((List<?>) readField(rows, emptyMap)).size()));
+
+            db.ingest(List.of(lviv), false);
+            db.local(Model.identity(lviv), "favorite", true);
+            refreshMap(activity);
+            awaitCamera(activity, 49.8397, 24.0297, 12);
+
+            MapActivity singleMap = activity;
+            org.maplibre.android.maps.MapLibreMap map = nativeMap(activity);
+            instrumentation.runOnMainSync(() -> map.setCameraPosition(
+                new org.maplibre.android.camera.CameraPosition.Builder()
+                    .target(new org.maplibre.android.geometry.LatLng(50.45, 30.52)).zoom(9).build()
+            ));
+            db.ingest(List.of(zaporizhzhia), false);
+            db.local(Model.identity(zaporizhzhia), "favorite", true);
+            refreshMap(activity);
+            long deadline = System.currentTimeMillis() + 15000;
+            java.util.concurrent.atomic.AtomicBoolean twoRows = new java.util.concurrent.atomic.AtomicBoolean();
+            while (!twoRows.get() && System.currentTimeMillis() < deadline) {
+                instrumentation.runOnMainSync(() -> twoRows.set(
+                    ((List<?>) readField(rows, singleMap)).size() == 2));
+                Thread.sleep(100);
+            }
+            assertTrue("Both favorite cities must refresh", twoRows.get());
+            awaitCamera(activity, 50.45, 30.52, 9);
+            instrumentation.runOnMainSync(activity::finish);
+
+            activity = startGlobalMap(c, query);
+            awaitVisibleCoordinates(activity, new double[][] { { 49.8397, 24.0297 }, { 47.8388, 35.1396 } });
+        } finally {
+            if (activity != null) instrumentation.runOnMainSync(activity::finish);
+            for (JSONObject row : List.of(lviv, zaporizhzhia)) {
+                db.getWritableDatabase().delete("history", "listing=?", new String[] { Model.identity(row) });
+                db.getWritableDatabase().delete("listing", "id=?", new String[] { Model.identity(row) });
+            }
+        }
+    }
+
+    private MapActivity startGlobalMap(Context c, String query) {
+        return (MapActivity) InstrumentationRegistry.getInstrumentation().startActivitySync(
+            new Intent(c, MapActivity.class)
+                .putExtra("filters", Json.object("favorite", true, "query", query, "currency", "USD").toString())
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    }
+
+    private org.maplibre.android.maps.MapLibreMap nativeMap(MapActivity activity) throws Exception {
+        java.lang.reflect.Field field = MapActivity.class.getDeclaredField("map");
+        field.setAccessible(true);
+        return (org.maplibre.android.maps.MapLibreMap) field.get(activity);
+    }
+
+    private void refreshMap(MapActivity activity) throws Exception {
+        java.lang.reflect.Field field = MapActivity.class.getDeclaredField("refresh");
+        field.setAccessible(true);
+        InstrumentationRegistry.getInstrumentation().runOnMainSync((Runnable) field.get(activity));
+    }
+
+    private void awaitCamera(MapActivity activity, double latitude, double longitude, double zoom) throws Exception {
+        long deadline = System.currentTimeMillis() + 15000;
+        java.util.concurrent.atomic.AtomicBoolean positioned = new java.util.concurrent.atomic.AtomicBoolean();
+        org.maplibre.android.maps.MapLibreMap map = nativeMap(activity);
+        while (!positioned.get() && System.currentTimeMillis() < deadline) {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                org.maplibre.android.camera.CameraPosition camera = map.getCameraPosition();
+                positioned.set(camera.target != null && Math.abs(camera.target.getLatitude() - latitude) < .0001
+                    && Math.abs(camera.target.getLongitude() - longitude) < .0001 && Math.abs(camera.zoom - zoom) < .01);
+            });
+            Thread.sleep(100);
+        }
+        assertTrue("Map must frame the actual marker or preserve the chosen camera", positioned.get());
+    }
+
+    private void awaitVisibleCoordinates(MapActivity activity, double[][] coordinates) throws Exception {
+        java.lang.reflect.Field mapField = MapActivity.class.getDeclaredField("map"),
+            viewField = MapActivity.class.getDeclaredField("view"),
+            loadedField = MapActivity.class.getDeclaredField("loaded");
+        mapField.setAccessible(true);
+        viewField.setAccessible(true);
+        loadedField.setAccessible(true);
+        java.util.concurrent.atomic.AtomicBoolean visible = new java.util.concurrent.atomic.AtomicBoolean();
+        long deadline = System.currentTimeMillis() + 45000;
+        while (!visible.get() && System.currentTimeMillis() < deadline) {
+            InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                org.maplibre.android.maps.MapLibreMap map =
+                    (org.maplibre.android.maps.MapLibreMap) readField(mapField, activity);
+                org.maplibre.android.maps.MapView view =
+                    (org.maplibre.android.maps.MapView) readField(viewField, activity);
+                if (map == null || !Boolean.TRUE.equals(readField(loadedField, activity)) || view.getWidth() == 0) return;
+                if (map.getCameraPosition().zoom < 3) return;
+                for (double[] coordinate : coordinates) {
+                    android.graphics.PointF point = map.getProjection().toScreenLocation(
+                        new org.maplibre.android.geometry.LatLng(coordinate[0], coordinate[1]));
+                    if (point.x < 12 || point.y < 12 || point.x > view.getWidth() - 12 || point.y > view.getHeight() - 12) return;
+                }
+                visible.set(true);
+            });
+            Thread.sleep(100);
+        }
+        assertTrue("Global map camera must include the real coordinates with padding", visible.get());
     }
 
     @Test

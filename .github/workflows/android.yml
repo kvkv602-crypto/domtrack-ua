@@ -35,7 +35,7 @@ jobs:
         shell: bash
         run: |
           set +e
-          "$RUNNER_TEMP/gradle-8.13/bin/gradle" --no-daemon --console=plain --stacktrace -p android testDebugUnitTest assembleDebug assembleDebugAndroidTest lintDebug 2>&1 | tee "$RUNNER_TEMP/android-build.log"
+          "$RUNNER_TEMP/gradle-8.13/bin/gradle" --no-daemon --console=plain --stacktrace -p android testDebugUnitTest assembleDebug assembleRelease assembleDebugAndroidTest lintDebug lintRelease 2>&1 | tee "$RUNNER_TEMP/android-build.log"
           build_status=${PIPESTATUS[0]}
           set -e
           if [ "$build_status" -ne 0 ]; then
@@ -74,6 +74,7 @@ jobs:
           name: DomTrack-Android-development
           path: |
             android/app/build/outputs/apk/debug/
+            android/app/build/outputs/apk/release/
             android/app/build/reports/
             android/app/build/test-results/
             ${{ runner.temp }}/android-build.log

@@ -53,6 +53,8 @@ final class OlxPage {
                 price.optDouble("price"),
                 "currency",
                 price.optString("currency"),
+                "priceEvidence",
+                "display",
                 "sellerType",
                 "unknown",
                 "observedAt",
