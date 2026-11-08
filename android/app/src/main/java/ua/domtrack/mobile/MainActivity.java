@@ -341,11 +341,12 @@ public class MainActivity extends Activity {
             body.addView(scan);
             addButton(body, activeSavedSearchId.isBlank()?"Сохранить поиск и включить наблюдение":"Сохранить изменения поиска", this::saveSearch);
             ArrayList<JSONObject> sections=new ArrayList<>();
-            for (Sources.Section section:Sources.sections(filters.optString("city"),filters.optString("kind","both"))) {
+            List<Sources.Section> sourceSections=Workspace.safeSourceSections(filters);
+            for (Sources.Section section:sourceSections) {
                 JSONObject state=Json.copy(db.state("section:"+section.key(),new JSONObject()));
                 Json.put(state,"source",section.source);sections.add(state);
             }
-            TextView coverage=text(Workspace.coverage(sections)+"\nЗагруженная подборка; охват всех объявлений не подтверждён.",12,MUTED);
+            TextView coverage=text(sourceSections.isEmpty()?"Выбери город в фильтрах, чтобы увидеть состояние источников.":Workspace.coverage(sections)+"\nЗагруженная подборка; охват всех объявлений не подтверждён.",12,MUTED);
             coverage.setOnClickListener(v->sourceStatus());body.addView(coverage);
         }
         LinearLayout ordering=row();
@@ -1278,10 +1279,9 @@ public class MainActivity extends Activity {
 
     private void sourceStatus() {
         LinearLayout content = column();
-        for (Sources.Section section : Sources.sections(
-            filters.optString("city"),
-            filters.optString("kind", "both")
-        )) {
+        List<Sources.Section> sections=Workspace.safeSourceSections(filters);
+        if(sections.isEmpty())content.addView(text("Выбери город в фильтрах, чтобы увидеть состояние источников.",14,MUTED));
+        for (Sources.Section section : sections) {
             JSONObject s = db.state("section:" + section.key(), new JSONObject());
             LinearLayout box = card();
             box.addView(

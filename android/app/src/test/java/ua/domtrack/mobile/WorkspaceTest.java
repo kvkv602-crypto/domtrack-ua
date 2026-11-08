@@ -6,6 +6,23 @@ import org.json.*;
 import org.junit.Test;
 
 public class WorkspaceTest {
+    @Test public void missingOrUnknownCityHasNoUiSourceSectionsWithoutChangingFilters() {
+        for(JSONObject filters:List.of(new JSONObject(),Json.object("city",""),Json.object("city","Несуществующий город","kind","apartment","priceMax",15000))) {
+            String original=filters.toString();
+            assertTrue(Workspace.safeSourceSections(filters).isEmpty());
+            assertEquals(original,filters.toString());
+            assertThrows(IllegalArgumentException.class,()->Sources.sections(filters.optString("city"),filters.optString("kind","both")));
+        }
+    }
+    @Test public void uiSourceSectionsRetainKnownCityAliasesAndKindConstraints() {
+        JSONObject filters=Json.object("city","Запорожье","kind","apartment");
+        String original=filters.toString();
+        List<Sources.Section> sections=Workspace.safeSourceSections(filters);
+        assertFalse(sections.isEmpty());
+        assertTrue(sections.stream().anyMatch(section->section.source.equals("olx")));
+        assertTrue(sections.stream().allMatch(section->section.kind.equals("apartment")&&Bilingual.city(section.city).equals("запоріжжя")));
+        assertEquals(original,filters.toString());
+    }
     @Test public void favoritesIgnoreSearchCityBudgetAndPolygon() throws Exception {
         JSONObject current=Json.object("city","Київ","kind","house","priceMax",100,"query","неподходящий запрос","polygon",new JSONArray("[[1,1],[2,2],[3,3]]"),"currency","USD");
         JSONObject result=Workspace.resultFilters(current,true);

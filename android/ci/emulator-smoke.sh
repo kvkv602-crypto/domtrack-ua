@@ -124,8 +124,6 @@ try:
     (out / 'AUTOMATIC-WORKER.txt').write_text(automatic_output)
     if automatic.returncode != 0 or 'FAILURES!!!' in automatic_output or 'INSTRUMENTATION_FAILED' in automatic_output or 'OK (' not in automatic_output:
         raise AssertionError('Automatic Worker regression failed: ' + automatic_output[-10000:])
-    subprocess.run(['python3','android/ci/closed-background.py'],check=True,timeout=1500)
-    (out / 'AUTOMATIC-CHECK.png').write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/automatic-check.png'))
     # Test output contains synthetic tokenizer text and aggregate counts only.
     result = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.DeviceUpgradeTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=360)
     output = result.stdout.decode(errors='replace') + result.stderr.decode(errors='replace')
@@ -147,6 +145,9 @@ try:
     (out / 'PUBLIC-READER.txt').write_text(reader_output)
     if reader.returncode != 0 or 'FAILURES!!!' in reader_output or 'INSTRUMENTATION_FAILED' in reader_output or 'OK (' not in reader_output:
         raise AssertionError('Public listing reader device tests failed: ' + reader_output[-10000:])
+    # Run quick UI/data regressions before the natural 15-minute periodic check.
+    subprocess.run(['python3','android/ci/closed-background.py'],check=True,timeout=1500)
+    (out / 'AUTOMATIC-CHECK.png').write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/automatic-check.png'))
     # Reopen the Activity after the test switched off the screen; ensure cached EUR results are visible.
     adb('shell','input','keyevent','82')
     adb('shell','wm','dismiss-keyguard')
@@ -187,6 +188,12 @@ try:
     (out / 'RESULT.txt').write_text('PASS: Android 16 cold start, native navigation, real multilingual neural inference and official tokenizer parity, SQLite migration, public RIA example, full search advances beyond four pages while screen off, stop and persistent cursors. No physical Samsung/battery test.\n')
     print('Android 16 native startup, navigation and live search: PASS')
 except Exception as error:
+    for image in ['map-native.png','map-selected.png','map-selected-no-coordinates.png',
+                  'combined-favorites.png','combined-tracking.png','combined-details.png','automatic-check.png']:
+        try:
+            (out / image).write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/'+image))
+        except Exception:
+            pass
     for name, args in [('failure-crashes.txt',('logcat','-b','crash','-d')),
                        ('failure-logcat.txt',('logcat','-d','-t','1000')),
                        ('failure-power.txt',('shell','dumpsys','power')),

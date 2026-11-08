@@ -39,6 +39,25 @@ public class CombinedWorkspaceDeviceTest {
         return null;
     }
     private void tap(String label){instrumentation().runOnMainSync(()->{View v=find(activity.findViewById(android.R.id.content),label);assertNotNull(label,v);assertTrue(v.performClick());});instrumentation().waitForIdleSync();}
+    @Test public void emptyAndUnknownCityRenderAndOpenSourceStatusWithoutChangingSavedFilters() {
+        UiDevice device=UiDevice.getInstance(instrumentation());
+        for(JSONObject filters:List.of(new JSONObject(),Json.object("city","Несуществующий город","kind","apartment","currency","USD"))) {
+            instrumentation().runOnMainSync(activity::finish);
+            instrumentation().waitForIdleSync();
+            db.saveState("currentFilters",filters);
+            String original=filters.toString();
+            activity=instrumentation().startActivitySync(new Intent(instrumentation().getTargetContext(),MainActivity.class)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TASK));
+            instrumentation().waitForIdleSync();
+            instrumentation().runOnMainSync(()->assertNotNull(find(activity.findViewById(android.R.id.content),"Выбери город в фильтрах, чтобы увидеть состояние источников.")));
+            tap("Источники и прогресс");
+            assertTrue(device.wait(Until.hasObject(By.text("Охват источников")),5000));
+            assertTrue(device.hasObject(By.text("Выбери город в фильтрах, чтобы увидеть состояние источников.")));
+            device.pressBack();
+            assertEquals(original,db.state("currentFilters",new JSONObject()).toString());
+        }
+        JSONObject report=db.state("combinedWorkspaceDeviceTest",new JSONObject());Json.put(report,"invalidCityUiSafe",true);db.saveState("combinedWorkspaceDeviceTest",report);
+    }
     @Test public void favoritesRemainVisibleAcrossSearchCityBudgetAndSort() {
         tap("Избранное");
         instrumentation().runOnMainSync(()->{assertNotNull(find(activity.findViewById(android.R.id.content),"Учебное избранное в Запорожье"));assertNotNull(find(activity.findViewById(android.R.id.content),"Избранное · все города и бюджеты"));});

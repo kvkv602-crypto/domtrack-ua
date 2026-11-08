@@ -5,6 +5,12 @@ import org.json.*;
 
 /** Presentation rules shared by the unified workspace and its device tests. */
 final class Workspace {
+    static List<Sources.Section> safeSourceSections(JSONObject filters) {
+        if(filters==null)return List.of();
+        String city=filters.optString("city");
+        if(Arrays.stream(Sources.CITIES).noneMatch(row->Bilingual.city(row[0]).equals(Bilingual.city(city))))return List.of();
+        return Sources.sections(city,filters.optString("kind","both"));
+    }
     static JSONObject resultFilters(JSONObject current, boolean favorites) {
         JSONObject result=favorites?new JSONObject():Json.copy(current);
         if(favorites){Json.put(result,"favorite",true);Json.put(result,"currency",current.optString("currency","EUR"));}
