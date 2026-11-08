@@ -4,6 +4,7 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.graphics.*;
+import android.net.Uri;
 import android.os.Bundle;
 import android.view.*;
 import android.widget.*;
@@ -24,6 +25,10 @@ public class MapActivity extends Activity {
     private Drawing drawing;
     private JSONObject filters;
     private JSONObject mapQuote;
+    private String selectedListingId = "";
+    private JSONObject selectedRecord;
+    private TextView selectedPrice, selectedAddress, selectedSource, selectedQuality;
+    private Button routeButton, recordButton;
     private final Map<String, String> labels = new HashMap<>();
     private TextView hint, coverage;
     private final android.os.Handler refreshHandler = new android.os.Handler(
@@ -33,6 +38,7 @@ public class MapActivity extends Activity {
         java.util.concurrent.Executors.newSingleThreadExecutor();
     private boolean active;
     private boolean globalCameraFramed, userMovedCamera;
+    private boolean selectedCameraFramed;
     private final Runnable refresh = new Runnable() {
         public void run() {
             if (!active) return;
@@ -43,17 +49,16 @@ public class MapActivity extends Activity {
 
                 ArrayList<JSONObject> rows = new ArrayList<>();
                 int missing = 0;
-                for (JSONObject r : db.listings())
+                JSONObject selected = selectedMode() ? db.get(selectedListingId) : null;
+                if (selectedMode()) {
+                    if (MapPresentation.hasCoordinates(selected)) rows.add(selected);
+                    else if (selected != null) missing++;
+                } else for (JSONObject r : db.listings())
                     if (!r.optBoolean("hidden") && Model.matches(r, f, quote)) {
-                        if (
-                            r.has("latitude") &&
-                            r.has("longitude") &&
-                            Double.isFinite(r.optDouble("latitude")) &&
-                            Double.isFinite(r.optDouble("longitude"))
-                        ) rows.add(r);
+                        if (MapPresentation.hasCoordinates(r)) rows.add(r);
                         else missing++;
                     }
-                List<JSONObject> unique = SemanticIndex.display(
+                List<JSONObject> unique = selectedMode() ? rows : SemanticIndex.display(
                     rows,
                     quote,
                     f.optString("currency", "USD"),
@@ -63,18 +68,14 @@ public class MapActivity extends Activity {
                 runOnUiThread(() -> {
                     if (!active) return;
                     mapQuote = quote;
+                    if (selectedMode()) selectedRecord = selected;
                     listings.clear();
                     listings.addAll(unique);
                     labels.clear();
-                    for (JSONObject r : listings) labels.put(r.optString("id"), price(r));
-                    if (coverage != null) coverage.setText(
-                        "Координаты площадок: " +
-                            unique.size() +
-                            " · без координат: " +
-                            without +
-                            "\n© OpenFreeMap · OpenMapTiles · OpenStreetMap"
-                    );
-                    frameGlobalCandidates();
+                    for (JSONObject r : listings) labels.put(r.optString("id"), markerPrice(r));
+                    updateSelectedPanel();
+                    if (coverage != null) coverage.setText(coverageText(unique.size(), without));
+                    frameCamera();
                     drawing.invalidate();
                     refreshHandler.postDelayed(this, 7000);
                 });
@@ -93,11 +94,17 @@ public class MapActivity extends Activity {
         filters = Json.obj(
             state == null ? getIntent().getStringExtra("filters") : state.getString("filters")
         );
+        selectedListingId = state == null
+            ? Objects.toString(getIntent().getStringExtra("selectedListingId"), "")
+            : state.getString("selectedListingId", "");
+        Database db = ((DomTrackApp) getApplication()).db();
+        selectedRecord = selectedMode() ? db.get(selectedListingId) : null;
         if (state != null) {
             globalCameraFramed = state.getBoolean("globalCameraFramed");
             userMovedCamera = state.getBoolean("userMovedCamera");
+            selectedCameraFramed = state.getBoolean("selectedCameraFramed");
         }
-        JSONArray polygon = state == null
+        JSONArray polygon = selectedMode() ? null : state == null
             ? filters.optJSONArray("polygon")
             : Json.obj(state.getString("shape", "{}")).optJSONArray("polygon");
         if (polygon != null) for (int i = 0; i < polygon.length(); i++) {
@@ -114,7 +121,7 @@ public class MapActivity extends Activity {
             return insets;
         });
         TextView title = new TextView(this);
-        title.setText("Территория поиска · " +
+        title.setText(selectedMode() ? "Объект на карте" : "Территория поиска · " +
             (filters.optString("city").isBlank() ? "Все города" : filters.optString("city")));
         title.setTextSize(20);
         title.setPadding(dp(12), dp(8), dp(12), dp(4));
@@ -133,8 +140,13 @@ public class MapActivity extends Activity {
                 })
             );
         toolbar.addView(modes);
-        root.addView(toolbar);
-        root.addView(
+        if (!selectedMode()) root.addView(toolbar);
+        else root.addView(button("К объекту", () -> {
+            userMovedCamera = false;
+            selectedCameraFramed = false;
+            frameCamera();
+        }));
+        if (!selectedMode()) root.addView(
             button("Загрузить координаты из объявлений", () -> {
                 if (SearchService.RUNNING.get()) {
                     Toast.makeText(
@@ -161,7 +173,7 @@ public class MapActivity extends Activity {
         view.onCreate(state);
         frame.addView(view, new FrameLayout.LayoutParams(-1, -1));
         view.addOnLayoutChangeListener((v, left, top, right, bottomEdge, oldLeft, oldTop, oldRight, oldBottom) ->
-            frameGlobalCandidates());
+            frameCamera());
         drawing = new Drawing();
         frame.addView(drawing, new FrameLayout.LayoutParams(-1, -1));
         root.addView(frame, new LinearLayout.LayoutParams(-1, 0, 1));
@@ -187,24 +199,22 @@ public class MapActivity extends Activity {
             new LinearLayout.LayoutParams(0, -2, 1)
         );
         bottom.addView(button("Применить", this::apply), new LinearLayout.LayoutParams(0, -2, 1));
-        root.addView(bottom);
+        if (!selectedMode()) root.addView(bottom);
+        else root.addView(selectedPanel());
         setContentView(root);
-        Database db = ((DomTrackApp) getApplication()).db();
         mapQuote = db.state("fx:" + Model.date(), new JSONObject());
         JSONObject noZone = MapFilters.candidates(filters);
 
         int missing = 0;
-        for (JSONObject r : db.listings())
+        if (selectedMode()) {
+            if (MapPresentation.hasCoordinates(selectedRecord)) listings.add(selectedRecord);
+            else if (selectedRecord != null) missing++;
+        } else for (JSONObject r : db.listings())
             if (!r.optBoolean("hidden") && Model.matches(r, noZone, mapQuote)) {
-                if (
-                    r.has("latitude") &&
-                    r.has("longitude") &&
-                    Double.isFinite(r.optDouble("latitude")) &&
-                    Double.isFinite(r.optDouble("longitude"))
-                ) listings.add(r);
+                if (MapPresentation.hasCoordinates(r)) listings.add(r);
                 else missing++;
             }
-        List<JSONObject> unique = SemanticIndex.display(
+        List<JSONObject> unique = selectedMode() ? new ArrayList<>(listings) : SemanticIndex.display(
             listings,
             mapQuote,
             filters.optString("currency", "USD"),
@@ -212,7 +222,8 @@ public class MapActivity extends Activity {
         );
         listings.clear();
         listings.addAll(unique);
-        for (JSONObject r : listings) labels.put(r.optString("id"), price(r));
+        for (JSONObject r : listings) labels.put(r.optString("id"), markerPrice(r));
+        updateSelectedPanel();
         final int without = missing;
         view.getMapAsync(m -> {
             map = m;
@@ -222,13 +233,13 @@ public class MapActivity extends Activity {
             map.addOnCameraMoveStartedListener(reason -> {
                 if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) userMovedCamera = true;
             });
-            if (!filters.optString("city").isBlank() || !zone.isEmpty()) {
+            if (!selectedMode() && (!filters.optString("city").isBlank() || !zone.isEmpty())) {
                 LatLng center = zone.isEmpty() ? cityCenter(filters.optString("city")) : zone.get(0);
                 map.setCameraPosition(new CameraPosition.Builder().target(center).zoom(12).build());
             }
             map.setStyle("https://tiles.openfreemap.org/styles/liberty", style -> {
                 loaded = true;
-                view.post(this::frameGlobalCandidates);
+                view.post(this::frameCamera);
                 updateHint();
                 drawing.invalidate();
             });
@@ -237,16 +248,132 @@ public class MapActivity extends Activity {
             );
             updateHint();
             coverage = new TextView(this);
-            coverage.setText(
-                "Координаты площадок: " +
-                    listings.size() +
-                    " · без координат: " +
-                    without +
-                    "\n© OpenFreeMap · OpenMapTiles · OpenStreetMap"
-            );
+            coverage.setText(coverageText(listings.size(), without));
             coverage.setTextSize(11);
             root.addView(coverage);
         });
+    }
+
+    private boolean selectedMode() {
+        return !selectedListingId.isBlank();
+    }
+
+    private String coverageText(int count, int missing) {
+        return (selectedMode() ? "" : "Координаты площадок: " + count + " · без координат: " + missing + "\n") +
+            "© OpenFreeMap · OpenMapTiles · OpenStreetMap";
+    }
+
+    private LinearLayout selectedPanel() {
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setPadding(dp(16), dp(10), dp(16), dp(8));
+        panel.setBackgroundColor(Color.WHITE);
+        panel.setElevation(dp(6));
+        selectedPrice = new TextView(this);
+        selectedPrice.setTextSize(22);
+        selectedPrice.setTypeface(null, Typeface.BOLD);
+        selectedPrice.setTextColor(0xff167e68);
+        selectedPrice.setContentDescription("Цена объекта");
+        panel.addView(selectedPrice);
+        selectedAddress = new TextView(this);
+        selectedAddress.setTextSize(15);
+        selectedAddress.setTextColor(0xff1b2b3b);
+        selectedAddress.setMaxLines(2);
+        selectedAddress.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        selectedAddress.setContentDescription("Адрес объекта");
+        panel.addView(selectedAddress);
+        selectedSource = new TextView(this);
+        selectedSource.setTextSize(12);
+        panel.addView(selectedSource);
+        selectedQuality = new TextView(this);
+        selectedQuality.setTextSize(13);
+        selectedQuality.setTextColor(0xff8a5b12);
+        selectedQuality.setPadding(0, dp(5), 0, dp(5));
+        panel.addView(selectedQuality);
+        LinearLayout actions = new LinearLayout(this);
+        routeButton = button("Маршрут", this::navigateToSelected);
+        recordButton = button("Карточка", () -> openRecord(selectedRecord));
+        actions.addView(routeButton, new LinearLayout.LayoutParams(0, -2, 1));
+        actions.addView(recordButton, new LinearLayout.LayoutParams(0, -2, 1));
+        panel.addView(actions);
+        return panel;
+    }
+
+    private void updateSelectedPanel() {
+        if (!selectedMode() || selectedPrice == null) return;
+        if (selectedRecord == null) {
+            selectedPrice.setText("Объект недоступен");
+            selectedAddress.setText("Запись не найдена в локальной базе");
+            selectedSource.setText("");
+            selectedQuality.setText("Точка объекта не показана");
+            routeButton.setEnabled(false);
+            recordButton.setEnabled(false);
+            return;
+        }
+        selectedPrice.setText(price(selectedRecord));
+        String address = selectedRecord.optString("address").trim();
+        selectedAddress.setText((selectedRecord.optString("city").trim() + " · " +
+            (address.isEmpty() ? "Адрес не указан" : address)).replaceFirst("^ · ", ""));
+        String source = selectedRecord.optString("source");
+        source = switch (source) {
+            case "domria-web", "ria" -> "DIM.RIA";
+            case "olx" -> "OLX";
+            case "rieltor" -> "Rieltor";
+            case "lun" -> "LUN";
+            case "flatfy" -> "Flatfy";
+            default -> source.isBlank() ? "не указан" : source;
+        };
+        selectedSource.setText("Источник: " + source);
+        selectedQuality.setText(switch (MapPresentation.precision(selectedRecord)) {
+            case MISSING -> "Координаты не переданы. Карта показана без точки объекта.";
+            case APPROXIMATE -> "≈ Примерное положение. Точный адрес дома не подтверждён.";
+            case UNSPECIFIED -> "≈ Точка из объявления. Источник не указал точность координат.";
+        });
+        routeButton.setText(address.isEmpty() ? "Маршрут к точке" : "Маршрут по адресу");
+        routeButton.setEnabled(!MapPresentation.routeUrl(selectedRecord).isBlank());
+        recordButton.setEnabled(true);
+        if (loaded) updateHint();
+    }
+
+    private void navigateToSelected() {
+        String url = MapPresentation.routeUrl(selectedRecord);
+        if (url.isBlank()) return;
+        try {
+            startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+        } catch (android.content.ActivityNotFoundException e) {
+            Toast.makeText(this, "На телефоне не найдено приложение для маршрута", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void openRecord(JSONObject record) {
+        if (record == null) return;
+        Intent result = new Intent().putExtra("listingId", record.optString("id"));
+        if (selectedMode()) result.putExtra("selectedMap", true);
+        else result.putExtra("filters", filters.toString());
+        setResult(RESULT_OK, result);
+        finish();
+    }
+
+    private void frameCamera() {
+        if (selectedMode()) frameSelected();
+        else frameGlobalCandidates();
+    }
+
+    private void frameSelected() {
+        if (!loaded || map == null || view.getWidth() == 0 || view.getHeight() == 0 ||
+            selectedCameraFramed || userMovedCamera) return;
+        if (MapPresentation.hasCoordinates(selectedRecord)) {
+            double zoom = MapPresentation.precision(selectedRecord) == MapPresentation.Precision.APPROXIMATE ? 13 : 15;
+            map.setCameraPosition(new CameraPosition.Builder().target(new LatLng(
+                selectedRecord.optDouble("latitude"), selectedRecord.optDouble("longitude"))).zoom(zoom).build());
+            selectedCameraFramed = true;
+        } else {
+            String city = selectedRecord == null ? "" : selectedRecord.optString("city");
+            boolean known = Arrays.stream(Sources.CITIES).anyMatch(c -> Bilingual.city(c[0]).equals(Bilingual.city(city)));
+            if (known) map.setCameraPosition(new CameraPosition.Builder().target(cityCenter(city)).zoom(11).build());
+            else map.moveCamera(CameraUpdateFactory.newLatLngBounds(new LatLngBounds.Builder()
+                .include(new LatLng(44, 22)).include(new LatLng(52.5, 40.5)).build(), dp(32)));
+        }
     }
 
     private void frameGlobalCandidates() {
@@ -292,6 +419,13 @@ public class MapActivity extends Activity {
     }
 
     private void updateHint() {
+        if (selectedMode()) {
+            hint.setText((loaded ? "" : "Загрузка карты… · ") +
+                (MapPresentation.hasCoordinates(selectedRecord)
+                    ? "Расположение из объявления · ≈ точность источником не подтверждена"
+                    : "Координаты объекта не переданы · точка не показана"));
+            return;
+        }
         String text = switch (mode) {
             case "Пальцем" -> "Обведи область пальцем одним движением";
             case "Точки" -> "Нажимай на границу участка: минимум три точки";
@@ -372,7 +506,15 @@ public class MapActivity extends Activity {
         return String.format(Locale.forLanguageTag("ru"), "%,.0f %s", amount, currency);
     }
 
+    private String markerPrice(JSONObject record) {
+        return (selectedMode() ? "≈ " : "") + price(record);
+    }
+
     private void openMarker(JSONObject record) {
+        if (selectedMode()) {
+            openRecord(record);
+            return;
+        }
         new AlertDialog.Builder(this)
             .setTitle(price(record))
             .setMessage(
@@ -406,14 +548,14 @@ public class MapActivity extends Activity {
 
         Drawing() {
             super(MapActivity.this);
-            setContentDescription("Граница территории поиска");
+            setContentDescription(selectedMode() ? "Карта выбранного объекта" : "Граница территории поиска");
         }
 
         protected void onDraw(Canvas canvas) {
             if (map == null) return;
             hitBoxes.clear();
             hitRecords.clear();
-            paint.setTextSize(dp(12));
+            paint.setTextSize(dp(selectedMode() ? 14 : 12));
             paint.setTypeface(Typeface.create(Typeface.DEFAULT, Typeface.BOLD));
             ArrayList<RectF> occupied = new ArrayList<>();
             for (JSONObject r : listings) {
@@ -438,11 +580,12 @@ public class MapActivity extends Activity {
                     box.offset(0, -dp(26));
                 }
                 paint.setStyle(Paint.Style.STROKE);
-                paint.setStrokeWidth(dp(1));
-                paint.setColor(0xff167e68);
+                paint.setStrokeWidth(dp(selectedMode() ? 2 : 1));
+                paint.setColor(selectedMode() ? 0xff956315 : 0xff167e68);
                 canvas.drawLine(p.x, p.y, box.centerX(), box.bottom, paint);
+                if (selectedMode()) canvas.drawCircle(p.x, p.y, dp(7), paint);
                 paint.setStyle(Paint.Style.FILL);
-                canvas.drawCircle(p.x, p.y, dp(3), paint);
+                if (!selectedMode()) canvas.drawCircle(p.x, p.y, dp(3), paint);
                 canvas.drawRoundRect(box, dp(7), dp(7), paint);
                 paint.setColor(Color.WHITE);
                 canvas.drawText(label, box.left + dp(7), box.top + dp(16), paint);
@@ -603,5 +746,7 @@ public class MapActivity extends Activity {
         b.putString("shape", Json.object("polygon", polygon()).toString());
         b.putBoolean("globalCameraFramed", globalCameraFramed);
         b.putBoolean("userMovedCamera", userMovedCamera);
+        b.putString("selectedListingId", selectedListingId);
+        b.putBoolean("selectedCameraFramed", selectedCameraFramed);
     }
 }

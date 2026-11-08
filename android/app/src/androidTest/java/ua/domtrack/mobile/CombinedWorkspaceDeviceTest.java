@@ -44,7 +44,7 @@ public class CombinedWorkspaceDeviceTest {
         instrumentation().runOnMainSync(()->{assertNotNull(find(activity.findViewById(android.R.id.content),"Учебное избранное в Запорожье"));assertNotNull(find(activity.findViewById(android.R.id.content),"Избранное · все города и бюджеты"));});
         tap("Новые сначала");assertEquals("newest",db.state("ui",new JSONObject()).optString("sort"));
         assertTrue(UiDevice.getInstance(instrumentation()).takeScreenshot(new File(activity.getFilesDir(),"combined-favorites.png")));
-        db.saveState("combinedWorkspaceDeviceTest",Json.object("favoritesGlobal",true,"visibleSort",true));
+        JSONObject report=db.state("combinedWorkspaceDeviceTest",new JSONObject());Json.put(report,"favoritesGlobal",true);Json.put(report,"visibleSort",true);db.saveState("combinedWorkspaceDeviceTest",report);
     }
     @Test public void trackingRetainsWatchCurrencyAndShowsExistingObject() {
         tap("Слежение");
@@ -60,6 +60,8 @@ public class CombinedWorkspaceDeviceTest {
             JSONObject row=Json.object("url","https://example.org/display-price","source","training","title","Учебная квартира","city","Запоріжжя","kind","apartment","deal","sale","price",15000,"currency","USD","priceEvidence","display","observedAt",java.time.Instant.now().minusSeconds(2).toString());
             fixture.ingest(List.of(row),false);JSONObject next=Json.copy(row);next.remove("priceEvidence");Json.put(next,"price",14000);Json.put(next,"observedAt",Model.now());fixture.ingest(List.of(next),false);
             assertEquals("display",fixture.get(Model.identity(row)).optString("priceEvidence"));assertFalse(Model.verifiedPrice(fixture.get(Model.identity(row))));
+            JSONObject api=Json.copy(next);Json.put(api,"source","domria");Json.put(api,"priceEvidence","native");Json.put(api,"observedAt",Model.now());fixture.ingest(List.of(api),false);assertTrue(Model.verifiedPrice(fixture.get(Model.identity(row))));
+            JSONObject web=Json.copy(api);web.remove("priceEvidence");Json.put(web,"source","domria-web");Json.put(web,"observedAt",Model.now());fixture.ingest(List.of(web),false);assertEquals("display",fixture.get(Model.identity(row)).optString("priceEvidence"));
         }finally{c.deleteDatabase(name);}
     }
     @Test public void oldTrackingSwitchCannotOverwriteANewerThreshold() {
@@ -70,5 +72,14 @@ public class CombinedWorkspaceDeviceTest {
         db.local(id,"watch",Json.object("enabled",false,"target",17000,"currency","UAH"));
         instrumentation().runOnMainSync(()->control.get().setChecked(true));
         JSONObject watch=db.get(id).optJSONObject("watch");assertEquals(17000,watch.optDouble("target"),0);assertEquals("UAH",watch.optString("currency"));assertTrue(watch.optBoolean("enabled"));
+    }
+    @Test public void selectedMapReturnPreservesSearchAndReopensOneCard() throws Exception {
+        JSONObject before=Json.copy(db.state("currentFilters",new JSONObject()));
+        java.lang.reflect.Method returned=MainActivity.class.getDeclaredMethod("onActivityResult",int.class,int.class,Intent.class);returned.setAccessible(true);
+        instrumentation().runOnMainSync(()->{try{returned.invoke(activity,24,Activity.RESULT_OK,new Intent().putExtra("listingId",id).putExtra("selectedMap",true));}catch(Exception error){throw new AssertionError(error);}});
+        instrumentation().waitForIdleSync();assertEquals(before.toString(),db.state("currentFilters",new JSONObject()).toString());
+        UiDevice device=UiDevice.getInstance(instrumentation());assertTrue(device.wait(Until.hasObject(By.text("Карта этого объекта")),5000));
+        assertTrue(device.takeScreenshot(new File(activity.getFilesDir(),"combined-details.png")));
+        JSONObject report=db.state("combinedWorkspaceDeviceTest",new JSONObject());Json.put(report,"selectedReturnKeepsSearch",true);db.saveState("combinedWorkspaceDeviceTest",report);
     }
 }

@@ -117,13 +117,20 @@ try:
     if result.returncode != 0 or 'FAILURES!!!' in output or 'INSTRUMENTATION_FAILED' in output or 'OK (' not in output:
         raise AssertionError('Device tests failed: ' + output[-10000:])
     (out / '07-native-map.png').write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/map-native.png'))
+    for image in ['map-selected.png','map-selected-no-coordinates.png']:
+        (out / image).write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/'+image))
     combined = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.CombinedWorkspaceDeviceTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=180)
     combined_output = combined.stdout.decode(errors='replace') + combined.stderr.decode(errors='replace')
     (out / 'COMBINED-WORKSPACE.txt').write_text(combined_output)
     if combined.returncode != 0 or 'FAILURES!!!' in combined_output or 'INSTRUMENTATION_FAILED' in combined_output or 'OK (' not in combined_output:
         raise AssertionError('Combined workspace device tests failed: ' + combined_output[-10000:])
-    for image in ['combined-favorites.png','combined-tracking.png']:
+    for image in ['combined-favorites.png','combined-tracking.png','combined-details.png']:
         (out / image).write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/'+image))
+    reader = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.ListingBrowserDeviceTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=180)
+    reader_output = reader.stdout.decode(errors='replace') + reader.stderr.decode(errors='replace')
+    (out / 'PUBLIC-READER.txt').write_text(reader_output)
+    if reader.returncode != 0 or 'FAILURES!!!' in reader_output or 'INSTRUMENTATION_FAILED' in reader_output or 'OK (' not in reader_output:
+        raise AssertionError('Public listing reader device tests failed: ' + reader_output[-10000:])
     # Reopen the Activity after the test switched off the screen; ensure cached EUR results are visible.
     adb('shell','input','keyevent','82')
     adb('shell','wm','dismiss-keyguard')
@@ -151,7 +158,7 @@ try:
         row = db.execute("SELECT data FROM state WHERE name='lastCheck'").fetchone()
         last = json.loads(row[0]) if row else {}
         extra = {}
-        for name in ['aiDeviceTest','screenOffTest','newSourcesTest','mapDeviceTest','automaticDeviceTest','combinedWorkspaceDeviceTest']:
+        for name in ['aiDeviceTest','screenOffTest','newSourcesTest','mapDeviceTest','selectedMapDeviceTest','automaticDeviceTest','combinedWorkspaceDeviceTest']:
             row = db.execute('SELECT data FROM state WHERE name=?',(name,)).fetchone()
             extra[name] = json.loads(row[0]) if row else {}
     (out / 'DEVICE-CHECKS.json').write_text(json.dumps(extra,indent=2))

@@ -366,6 +366,88 @@ public class DeviceUpgradeTest {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
     }
 
+    @Test
+    public void test03cSelectedObjectMapIgnoresSearchAndNeverInventsMissingCoordinates() throws Exception {
+        Instrumentation instrumentation = InstrumentationRegistry.getInstrumentation();
+        Context c = context();
+        Database db = ((DomTrackApp) c.getApplicationContext()).db();
+        JSONObject selected = Json.object(
+            "url", "https://example.org/selected-map-lviv", "source", "domria-web",
+            "title", "Обрана квартира", "city", "Львів", "address", "вул. Городоцька, 12",
+            "kind", "apartment", "deal", "sale", "price", 99000, "currency", "USD",
+            "latitude", 49.8397, "longitude", 24.0297, "locationAccuracy", "source-unspecified"
+        );
+        JSONObject withoutCoordinates = Json.copy(selected);
+        Json.put(withoutCoordinates, "url", "https://example.org/selected-map-no-coordinates");
+        Json.put(withoutCoordinates, "city", "Запоріжжя");
+        Json.put(withoutCoordinates, "address", "вул. Брюллова, 16");
+        withoutCoordinates.remove("latitude");
+        withoutCoordinates.remove("longitude");
+        db.ingest(List.of(selected, withoutCoordinates), false);
+        String selectedId = Model.identity(selected), missingId = Model.identity(withoutCoordinates);
+        db.local(selectedId, "hidden", true);
+        JSONObject unrelatedSearch = Json.object(
+            "city", "Запоріжжя", "priceMax", 1000, "currency", "USD", "favorite", true,
+            "polygon", new JSONArray("[[47.83,35.12],[47.84,35.12],[47.84,35.13],[47.83,35.13]]")
+        );
+        MapActivity activity = null;
+        try {
+            activity = startSelectedMap(c, selectedId, unrelatedSearch);
+            awaitVisibleCoordinates(activity, new double[][] { { 49.8397, 24.0297 } });
+            awaitCamera(activity, 49.8397, 24.0297, 15);
+            java.lang.reflect.Field rows = MapActivity.class.getDeclaredField("listings"),
+                quality = MapActivity.class.getDeclaredField("selectedQuality"),
+                address = MapActivity.class.getDeclaredField("selectedAddress"),
+                price = MapActivity.class.getDeclaredField("selectedPrice"),
+                labels = MapActivity.class.getDeclaredField("labels"),
+                route = MapActivity.class.getDeclaredField("routeButton");
+            for (java.lang.reflect.Field field : List.of(rows, quality, address, price, labels, route)) field.setAccessible(true);
+            MapActivity focused = activity;
+            instrumentation.runOnMainSync(() -> {
+                List<?> markers = (List<?>) readField(rows, focused);
+                assertEquals(1, markers.size());
+                assertEquals(selectedId, ((JSONObject) markers.get(0)).optString("id"));
+                assertTrue(((android.widget.TextView) readField(address, focused)).getText().toString().contains("Городоцька, 12"));
+                assertTrue(((android.widget.TextView) readField(price, focused)).getText().toString().contains("USD"));
+                assertTrue(((android.widget.TextView) readField(quality, focused)).getText().toString().contains("не указал точность"));
+                assertTrue(((Map<?, ?>) readField(labels, focused)).get(selectedId).toString().startsWith("≈ "));
+            });
+            UiDevice device = UiDevice.getInstance(instrumentation);
+            assertTrue(device.takeScreenshot(new java.io.File(c.getFilesDir(), "map-selected.png")));
+            device.findObject(new androidx.test.uiautomator.UiSelector().text("Карточка")).click();
+            Thread.sleep(300);
+            assertTrue("Selected map must return to the object card", activity.isFinishing());
+
+            activity = startSelectedMap(c, missingId, unrelatedSearch);
+            awaitVisibleCoordinates(activity, new double[][] { { 47.8388, 35.1396 } });
+            awaitCamera(activity, 47.8388, 35.1396, 11);
+            MapActivity missing = activity;
+            instrumentation.runOnMainSync(() -> {
+                assertEquals("City context must not create a property marker", 0,
+                    ((List<?>) readField(rows, missing)).size());
+                assertTrue(((android.widget.TextView) readField(quality, missing)).getText().toString().contains("без точки объекта"));
+                android.widget.Button button = (android.widget.Button) readField(route, missing);
+                assertTrue("An address can still be used for directions", button.isEnabled());
+                assertEquals("Маршрут по адресу", button.getText().toString());
+            });
+            assertTrue(device.takeScreenshot(new java.io.File(c.getFilesDir(), "map-selected-no-coordinates.png")));
+            db.saveState("selectedMapDeviceTest", Json.object(
+                "selectedOutsideSearch", true, "accuracyUnspecified", true, "missingCoordinatesHaveNoPin", true));
+        } finally {
+            if (activity != null) instrumentation.runOnMainSync(activity::finish);
+            for (String id : List.of(selectedId, missingId)) {
+                db.getWritableDatabase().delete("history", "listing=?", new String[] { id });
+                db.getWritableDatabase().delete("listing", "id=?", new String[] { id });
+            }
+        }
+    }
+
+    private MapActivity startSelectedMap(Context c, String id, JSONObject filters) {
+        return (MapActivity) InstrumentationRegistry.getInstrumentation().startActivitySync(
+            new Intent(c, MapActivity.class).putExtra("selectedListingId", id)
+                .putExtra("filters", filters.toString()).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+    }
+
     private org.maplibre.android.maps.MapLibreMap nativeMap(MapActivity activity) throws Exception {
         java.lang.reflect.Field field = MapActivity.class.getDeclaredField("map");
         field.setAccessible(true);

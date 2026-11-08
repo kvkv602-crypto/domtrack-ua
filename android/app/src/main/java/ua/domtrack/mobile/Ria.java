@@ -1,59 +1,144 @@
 package ua.domtrack.mobile;
 
 import android.content.Context;
+import java.net.URI;
 import java.util.*;
+import java.util.function.BooleanSupplier;
+import java.util.regex.*;
 import org.json.*;
 
 final class Ria {
 
     private final Database db;
-    private final Network net = new Network();
+    private final Network net;
     private final String key, quotaKey;
+    private static final Object REQUEST_LOCK = new Object();
+    private static final Pattern LISTING_PATH = Pattern.compile(
+        "/(?:uk/)?realty-(?:[a-z0-9]+-)*([1-9][0-9]{0,11})\\.html"
+    );
 
     Ria(Context c, Database d) throws Exception {
+        this(c, d, new Network());
+    }
+
+    Ria(Context c, Database d, Network network) throws Exception {
         db = d;
+        net = network;
         key = new Secrets(c).get();
         if (key.isBlank()) throw new IllegalArgumentException("Сначала сохрани API-ключ RIA");
         quotaKey = "ria-quota:" + Model.hash(key);
     }
 
     private Object request(String path, Map<String, String> query) throws Exception {
-        JSONObject quota = db.state(
-            quotaKey,
-            Json.object("started", System.currentTimeMillis(), "used", 0)
+        return request(path, query, () -> false, Long.MAX_VALUE);
+    }
+
+    private static void running(BooleanSupplier stop, long until) throws InterruptedException {
+        if (stop.getAsBoolean() || Thread.currentThread().isInterrupted()) throw new InterruptedException(
+            "Проверка RIA остановлена"
         );
-        if (System.currentTimeMillis() - quota.optLong("started") >= 30L * 86400000L) quota =
-            Json.object("started", System.currentTimeMillis(), "used", 0);
-        if (quota.optInt("used") >= 100) throw new IllegalArgumentException(
-            "Достигнут локальный лимит 100 запросов API за 30 дней"
-        );
-        if (
-            quota.optLong("blockedUntil") > System.currentTimeMillis()
-        ) throw new IllegalArgumentException("Повтор API отложен после отказа источника");
-        long delay = quota.optLong("lastRequest") + 2200 - System.currentTimeMillis();
-        if (delay > 0) Thread.sleep(delay);
-        Json.put(quota, "used", quota.optInt("used") + 1);
-        Json.put(quota, "lastRequest", System.currentTimeMillis());
-        db.saveState(quotaKey, quota);
-        okhttp3.HttpUrl.Builder b = Network.safe("https://developers.ria.com" + path)
-            .newBuilder()
-            .addQueryParameter("api_key", key);
-        for (Map.Entry<String, String> q : query.entrySet())
-            b.addQueryParameter(q.getKey(), q.getValue());
-        try {
-            return new JSONTokener(net.get(b.build().toString()).body).nextValue();
-        } catch (Exception e) {
-            if (
-                Objects.toString(e.getMessage(), "").contains("429") ||
-                Objects.toString(e.getMessage(), "").contains("403")
-            ) {
-                Json.put(quota, "blockedUntil", System.currentTimeMillis() + 3600000L);
-                db.saveState(quotaKey, quota);
-            }
-            throw new IllegalArgumentException(
-                "Не удалось получить данные RIA. Проверь доступ и квоту в кабинете."
+        if (System.currentTimeMillis() >= until) throw new IllegalArgumentException("Время проверки RIA истекло");
+    }
+
+    private Object request(String path, Map<String, String> query, BooleanSupplier stop, long until) throws Exception {
+        // All callers share the persisted 100-request budget, including direct watch refreshes.
+        synchronized (REQUEST_LOCK) {
+            running(stop, until);
+            JSONObject quota = db.state(
+                quotaKey,
+                Json.object("started", System.currentTimeMillis(), "used", 0)
             );
+            if (System.currentTimeMillis() - quota.optLong("started") >= 30L * 86400000L) quota =
+                Json.object("started", System.currentTimeMillis(), "used", 0);
+            if (quota.optInt("used") >= 100) throw new IllegalArgumentException(
+                "Достигнут локальный лимит 100 запросов API за 30 дней"
+            );
+            if (
+                quota.optLong("blockedUntil") > System.currentTimeMillis()
+            ) throw new IllegalArgumentException("Повтор API отложен после отказа источника");
+            long delay = quota.optLong("lastRequest") + 2200 - System.currentTimeMillis();
+            if (delay > 0 && delay >= until - System.currentTimeMillis()) throw new IllegalArgumentException(
+                "Время проверки RIA истекло"
+            );
+            if (delay > 0) Thread.sleep(delay);
+            running(stop, until);
+            Json.put(quota, "used", quota.optInt("used") + 1);
+            Json.put(quota, "lastRequest", System.currentTimeMillis());
+            db.saveState(quotaKey, quota);
+            okhttp3.HttpUrl.Builder b = Network.safe("https://developers.ria.com" + path)
+                .newBuilder()
+                .addQueryParameter("api_key", key);
+            for (Map.Entry<String, String> q : query.entrySet())
+                b.addQueryParameter(q.getKey(), q.getValue());
+            try {
+                Object response = new JSONTokener(net.get(b.build().toString()).body).nextValue();
+                running(stop, until);
+                return response;
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw e;
+            } catch (Exception e) {
+                if (
+                    Objects.toString(e.getMessage(), "").contains("429") ||
+                    Objects.toString(e.getMessage(), "").contains("403")
+                ) {
+                    Json.put(quota, "blockedUntil", System.currentTimeMillis() + 3600000L);
+                    db.saveState(quotaKey, quota);
+                }
+                throw new IllegalArgumentException(
+                    "Не удалось получить данные RIA. Проверь доступ и квоту в кабинете."
+                );
+            }
         }
+    }
+
+    static boolean nativeWatch(JSONObject row) {
+        return row != null && "domria".equals(row.optString("source"));
+    }
+
+    private static String listingId(String value) {
+        try {
+            URI uri = URI.create(value);
+            if (!"dom.ria.com".equals(Network.safe(value).host()) || uri.getRawFragment() != null) return "";
+            Matcher match = LISTING_PATH.matcher(uri.getRawPath());
+            return match.matches() ? match.group(1) : "";
+        } catch (Exception e) { return ""; }
+    }
+
+    private static String watchId(JSONObject previous) {
+        String id = previous.optString("externalId");
+        if (!nativeWatch(previous) || !id.matches("[1-9][0-9]{0,11}") ||
+            !id.equals(listingId(previous.optString("url"))) || previous.optString("city").isBlank() ||
+            !List.of("apartment", "house").contains(previous.optString("kind")) ||
+            !"sale".equals(previous.optString("deal", "sale"))) throw new IllegalArgumentException(
+                "RIA: исходное API-объявление и его ссылка не подтверждены"
+            );
+        return id;
+    }
+
+    JSONObject info(JSONObject previous, BooleanSupplier stop, long until) throws Exception {
+        String id = watchId(previous);
+        Object response = request("/dom/info/" + id, Map.of(), stop, until);
+        if (!(response instanceof JSONObject payload)) throw new IllegalArgumentException(
+            "RIA: неизвестный формат API-объявления"
+        );
+        return watched(payload, previous);
+    }
+
+    static JSONObject watched(JSONObject payload, JSONObject previous) {
+        String id = watchId(previous);
+        if (payload == null || payload.optString("city_name").isBlank()) throw new IllegalArgumentException(
+            "RIA: город исходного объявления не подтверждён"
+        );
+        JSONObject fresh = normalize(payload, id, previous.optString("city"), previous.optString("kind"));
+        if (fresh == null || !id.equals(listingId(fresh.optString("url")))) throw new IllegalArgumentException(
+            "RIA: исходное объявление не подтверждено; прежняя цена не считается новой проверкой"
+        );
+        // The API has confirmed the original externalId, city and kind. A renamed beautiful_url
+        // must update that listing's existing history rather than create a different Model key.
+        Json.put(fresh, "url", previous.optString("url"));
+        Model.validate(fresh);
+        return fresh;
     }
 
     private int location(String city) throws Exception {
@@ -200,6 +285,8 @@ final class Ria {
             price,
             "currency",
             currency,
+            "priceEvidence",
+            "native",
             "observedAt",
             Model.now(),
             "status",

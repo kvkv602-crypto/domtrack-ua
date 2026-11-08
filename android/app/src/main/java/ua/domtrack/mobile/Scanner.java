@@ -319,6 +319,7 @@ final class Scanner {
         AtomicInteger imported,
         long until, int limit
     ) {
+        BooleanSupplier halted = () -> cancelled.get() || stop.getAsBoolean() || Thread.currentThread().isInterrupted();
         List<JSONObject> rows = db
             .listings()
             .stream()
@@ -335,16 +336,23 @@ final class Scanner {
             int i = 0;
             i < rows.size() &&
             checked < limit &&
-            !stop.getAsBoolean() &&
+            !halted.getAsBoolean() &&
             System.currentTimeMillis() < until;
             i++
         ) {
             JSONObject r = rows.get(Math.floorMod(cursor + i, rows.size()));
             db.saveState("watchCursor", Json.object("next", cursor + i + 1));
+            checked++;
             try {
-                String url = Sources.watchUrl(r);
                 if (!seen.add(Model.identity(r))) continue;
-                checked++;
+                if (Ria.nativeWatch(r)) {
+                    JSONObject fresh = new Ria(context, db, net).info(r, halted, until);
+                    if (halted.getAsBoolean() || System.currentTimeMillis() >= until) break;
+                    imported.addAndGet(db.ingest(List.of(fresh), false, true));
+                    successful++;
+                    continue;
+                }
+                String url = Sources.watchUrl(r);
                 if (!net.robotsAllowed(url, db)) {
                     failures.add("Наблюдение: robots.txt ограничивает загрузку");
                     continue;
@@ -353,7 +361,8 @@ final class Scanner {
                 imported.addAndGet(db.ingest(Sources.watchRecords(response.body, response.url, r), false, true));
                 successful++;
             } catch (Exception e) {
-                if (stop.getAsBoolean() || Thread.currentThread().isInterrupted()) break;
+                if (e instanceof InterruptedException) Thread.currentThread().interrupt();
+                if (halted.getAsBoolean()) break;
                 failures.add("Наблюдение: " + safe(e));
             }
         }

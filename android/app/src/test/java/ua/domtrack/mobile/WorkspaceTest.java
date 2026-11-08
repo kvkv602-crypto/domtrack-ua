@@ -38,6 +38,9 @@ public class WorkspaceTest {
     @Test public void displayPriceChangesCannotBecomeVerifiedDropOrThresholdAlerts() {
         JSONObject before=Json.object("price",15000,"currency","USD","title","Квартира"),next=Json.object("price",14000,"currency","USD","title","Квартира","priceEvidence","display"),watch=Json.object("target",14500,"currency","USD");
         assertFalse(Model.eventTypes(before,next,true,watch,new JSONObject()).contains("price"));
+        assertFalse(Model.verifiedPrice(Json.object("source","domria-web","price",14500)));
+        assertFalse(Model.verifiedPrice(Json.object("source","web:dom.ria.com","price",14500)));
+        assertTrue(Model.verifiedPrice(Json.object("source","domria","priceEvidence","native","price",14500)));
         assertFalse(Model.eventTypes(before,next,true,watch,new JSONObject()).contains("threshold"));
         Json.put(before,"priceEvidence","display");next.remove("priceEvidence");
         assertFalse(Model.eventTypes(before,next,true,watch,new JSONObject()).contains("price"));
@@ -54,5 +57,13 @@ public class WorkspaceTest {
         Json.put(again,"image","https://example.org/old.jpg?resize=mobile");
         assertFalse(Model.eventTypes(detail,again,true,null,new JSONObject()).contains("object"));
         Json.put(again,"rooms",3);assertTrue(Model.eventTypes(detail,again,true,null,new JSONObject()).contains("object"));
+    }
+    @Test public void webDisplayCannotInheritAnOlderNativeApiPriceMarker() {
+        JSONObject api=Json.object("source","domria","priceEvidence","native","price",15000);
+        JSONObject web=Json.object("source","domria-web","price",14000);
+        Model.keepPriceEvidence(api,web);assertEquals("display",web.optString("priceEvidence"));assertFalse(Model.verifiedPrice(web));
+        JSONObject sparse=Json.object("source","training","price",14000);
+        Model.keepPriceEvidence(Json.object("source","training","priceEvidence","display"),sparse);assertEquals("display",sparse.optString("priceEvidence"));
+        Model.keepPriceEvidence(web,api);assertTrue(Model.verifiedPrice(api));
     }
 }

@@ -31,6 +31,9 @@ public class MainActivity extends Activity {
     private String tab = "Поиск";
     private String activeSavedSearchId = "";
     private boolean favoriteMapOpened;
+    private String pendingBrowserUrl="";
+    private String openedListingId="";
+    private AlertDialog openedListingDialog;
     private int visibleCount = 30;
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private final AtomicBoolean stopped = new AtomicBoolean();
@@ -57,8 +60,11 @@ public class MainActivity extends Activity {
             activeSavedSearchId=state.getString("activeSavedSearchId","");
             favoriteMapOpened=state.getBoolean("favoriteMapOpened");
             tab=state.getString("workspaceTab","Поиск");
+            pendingBrowserUrl=state.getString("pendingBrowserUrl","");
+            openedListingId=state.getString("openedListingId","");
         }
         build();
+        if(!openedListingId.isBlank()){String restore=openedListingId;handler.post(()->detail(restore));}
         handleIntent(getIntent());
     }
 
@@ -91,6 +97,7 @@ public class MainActivity extends Activity {
 
     protected void onDestroy() {
         stopped.set(true);
+        if(openedListingDialog!=null)openedListingDialog.dismiss();
         io.shutdownNow();
         super.onDestroy();
     }
@@ -779,10 +786,13 @@ public class MainActivity extends Activity {
     private void detail(String id) {
         JSONObject r = db.get(id);
         if (r == null) return;
+        if(openedListingDialog!=null)openedListingDialog.dismiss();
+        openedListingId=id;
         LinearLayout content = column();
         content.addView(heading(price(r)));
         content.addView(text(r.optString("title"), 19, INK));
         content.addView(text(spec(r) + "\n" + r.optString("address"), 15, MUTED));
+        addButton(content,"Карта этого объекта",()->mapListing(r));
         if (!Model.verifiedPrice(r)) content.addView(text("Это отображаемая цена площадки. Она сохраняется в истории, но не подтверждает изменение исходной цены продавца; уведомления о снижении и пороге по ней не создаются.",13,MUTED));
         content.addView(
             text(
@@ -919,7 +929,10 @@ public class MainActivity extends Activity {
             render();
             toast("Объект скрыт");
         });
-        dialog("Объект", content).show();
+        AlertDialog details=dialog("Объект", content);
+        openedListingDialog=details;
+        details.setOnDismissListener(d->{if(openedListingDialog==details){openedListingDialog=null;openedListingId="";}});
+        details.show();
     }
 
     private void threshold(String id, JSONObject r) {
@@ -1321,9 +1334,35 @@ public class MainActivity extends Activity {
     }
 
     private void addUrl(String initial) {
-        prompt("Ссылка на объявление", initial, false, url ->
-            async(() -> "Загружено объектов: " + new Scanner(this, db).importUrl(url))
-        );
+        prompt("Ссылка на объявление", initial, false,this::importListingUrl);
+    }
+
+    private void importListingUrl(String url) {
+        io.execute(()->{
+            try {
+                int count=new Scanner(this,db).importUrl(url);
+                if(count<1)throw new IllegalArgumentException("Поддерживаемые данные объекта не найдены");
+                handler.post(()->{toast("Загружено объектов: "+count);render();});
+            } catch(Exception error) {
+                String message=Scanner.safe(error);
+                handler.post(()->{
+                    if(isFinishing()||isDestroyed())return;
+                    AlertDialog.Builder choice=new AlertDialog.Builder(this).setTitle("Проверка объявления")
+                        .setMessage(message+"\n\nМожно открыть доступную публичную страницу и прочитать её после загрузки. Это ручное добавление; фоновые проверки используют API и публичный сканер.")
+                        .setNegativeButton("Закрыть",null);
+                    if(ListingBrowserPolicy.target(url)!=null)choice.setPositiveButton("Прочитать страницу",(d,w)->openListingBrowser(url));
+                    try{Network.safe(url);choice.setNeutralButton("Открыть оригинал",(d,w)->open(url));}catch(Exception ignored){}
+                    choice.show();
+                });
+            }
+        });
+    }
+
+    private void openListingBrowser(String url) {
+        ListingBrowserPolicy.Target target=ListingBrowserPolicy.target(url);
+        if(target==null){toast("Встроенный просмотр доступен для отдельных объявлений DIM.RIA и OLX");return;}
+        pendingBrowserUrl=target.url;
+        startActivityForResult(new Intent(this,ListingBrowserActivity.class).putExtra("url",target.url),25);
     }
 
     private void manual() {
@@ -1382,6 +1421,13 @@ public class MainActivity extends Activity {
             new Intent(this, MapActivity.class).putExtra("filters", Workspace.resultFilters(filters,favorites).toString()),
             24
         );
+    }
+
+    private void mapListing(JSONObject listing) {
+        favoriteMapOpened=false;
+        startActivityForResult(new Intent(this,MapActivity.class)
+            .putExtra("selectedListingId",listing.optString("id"))
+            .putExtra("filters",Json.object("currency",filters.optString("currency","EUR")).toString()),24);
     }
 
     private void shareListing(JSONObject listing) {
@@ -1464,8 +1510,27 @@ public class MainActivity extends Activity {
 
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if(request==25) {
+            String expected=pendingBrowserUrl;pendingBrowserUrl="";
+            if(result!=RESULT_OK||data==null)return;
+            String html=data.getStringExtra("html"),actual=data.getStringExtra("url");
+            try {
+                ListingBrowserPolicy policy=new ListingBrowserPolicy(expected);
+                if(!policy.sameListing(actual)||html==null||html.getBytes(StandardCharsets.UTF_8).length>256*1024)throw new IllegalArgumentException("Исходная страница не подтверждена");
+                async(()->{
+                    List<JSONObject> candidates=Sources.importRecords(html,expected,actual);
+                    List<JSONObject> matched=candidates.stream().filter(r->policy.sameListing(r.optString("url"))).toList();
+                    if(matched.size()!=1)throw new IllegalArgumentException("Не удалось однозначно подтвердить цену и исходный объект");
+                    int count=db.ingest(matched,false);
+                    if(count<1)throw new IllegalArgumentException("Данные открытой страницы не сохранены");
+                    return "Объект добавлен из открытой страницы. Фоновый доступ зависит от площадки.";
+                });
+            }catch(Exception error){toast(Scanner.safe(error));}
+            return;
+        }
         if (request == 24 && result == RESULT_OK && data != null) {
-            if(!favoriteMapOpened){filters = Json.obj(data.getStringExtra("filters"));db.saveState("currentFilters", filters);}
+            String returnedFilters=data.getStringExtra("filters");
+            if(!favoriteMapOpened&&returnedFilters!=null){filters = Json.obj(returnedFilters);db.saveState("currentFilters", filters);}
             favoriteMapOpened=false;
             render();
             String id = data.getStringExtra("listingId");
@@ -1791,6 +1856,8 @@ public class MainActivity extends Activity {
         state.putString("activeSavedSearchId",activeSavedSearchId);
         state.putBoolean("favoriteMapOpened",favoriteMapOpened);
         state.putString("workspaceTab",tab);
+        state.putString("pendingBrowserUrl",pendingBrowserUrl);
+        state.putString("openedListingId",openedListingId);
     }
 
     private void visitTools(LinearLayout content, JSONObject r) {

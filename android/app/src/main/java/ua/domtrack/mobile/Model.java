@@ -255,6 +255,7 @@ final class Model {
 
     static boolean verifiedPrice(JSONObject row) {
         return row!=null && !"display".equals(row.optString("priceEvidence")) &&
+            (!displayOnlySource(row.optString("source"))||"native".equals(row.optString("priceEvidence"))) &&
             !"coordinates".equals(row.optString("observationKind")) &&
             Double.isFinite(row.optDouble("price",Double.NaN));
     }
@@ -266,6 +267,16 @@ final class Model {
     static void keepKnownFacts(JSONObject previous,JSONObject next) {
         if(previous==null)return;
         for(String key:FACTS)if(!known(next.opt(key))&&known(previous.opt(key)))Json.put(next,key,previous.opt(key));
+    }
+
+    private static boolean displayOnlySource(String source) {
+        return List.of("olx","domria-web","web:dom.ria.com","web:www.olx.ua","web:olx.ua","web:m.olx.ua").contains(source);
+    }
+
+    static void keepPriceEvidence(JSONObject previous,JSONObject next) {
+        if(next.has("priceEvidence"))return;
+        if(displayOnlySource(next.optString("source")))Json.put(next,"priceEvidence","display");
+        else if(previous!=null&&previous.optString("source").equals(next.optString("source"))&&previous.has("priceEvidence"))Json.put(next,"priceEvidence",previous.opt("priceEvidence"));
     }
 
     private static boolean knownFactsChanged(JSONObject before,JSONObject after) {

@@ -10,6 +10,10 @@ public class DomTrackApp extends Application {
 
     public void onCreate() {
         super.onCreate();
+        if ((getPackageName() + ":listing_reader").equals(Application.getProcessName())) {
+            android.webkit.WebView.setDataDirectorySuffix("listing_reader");
+            return;
+        }
         database = new Database(this);
         Alerts.channels(this);
         schedule();
