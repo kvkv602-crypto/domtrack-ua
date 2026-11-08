@@ -225,7 +225,7 @@ public class MainActivity extends Activity {
         nav = row();
         for (String name : List.of("Поиск", "Карта", "Избранное", "Слежение", "Ещё")) {
             Button b = button(name, () -> {
-                if (name.equals("Карта")) { map(); return; }
+                if (name.equals("Карта")) { map(tab.equals("Избранное")); return; }
                 tab = name;
                 visibleCount = 30;
                 render();

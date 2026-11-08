@@ -6,7 +6,7 @@ import org.json.*;
 import org.junit.Test;
 
 public class WorkspaceTest {
-    @Test public void favoritesIgnoreSearchCityBudgetAndPolygon() {
+    @Test public void favoritesIgnoreSearchCityBudgetAndPolygon() throws Exception {
         JSONObject current=Json.object("city","Київ","kind","house","priceMax",100,"query","неподходящий запрос","polygon",new JSONArray("[[1,1],[2,2],[3,3]]"),"currency","USD");
         JSONObject result=Workspace.resultFilters(current,true);
         assertTrue(result.optBoolean("favorite"));
