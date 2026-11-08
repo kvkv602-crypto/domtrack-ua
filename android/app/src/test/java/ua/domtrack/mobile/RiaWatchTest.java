@@ -101,4 +101,14 @@ public class RiaWatchTest {
             assertFalse(field, next.has("riaApiIdentity")); assertFalse(field, Ria.nativeWatch(next));
         }
     }
+    @Test public void russianAndUkrainianCityNamesKeepTheSameVerifiedTarget() {
+        JSONObject russian=payload();Json.put(russian,"city_name","Запорожье");
+        JSONObject fresh=Ria.watched(russian,previous());
+        assertEquals(14500,fresh.optDouble("price"),0);
+        JSONObject stored=Json.copy(fresh);Ria.keepApiIdentity(null,stored,fresh);
+        JSONObject catalog=Json.copy(stored);Json.put(catalog,"city","Запоріжжя");Json.put(catalog,"source","domria-web");catalog.remove("externalId");
+        Ria.keepApiIdentity(stored,catalog,catalog);
+        assertTrue(Ria.nativeWatch(catalog));
+        assertEquals(14500,Ria.watched(payload(),catalog).optDouble("price"),0);
+    }
 }

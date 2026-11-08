@@ -112,7 +112,7 @@ final class Ria {
             return id.matches("[1-9][0-9]{0,11}") && id.equals(listingId(row.optString("url"))) &&
                 marker.optString("listingId").equals(Model.identity(row)) &&
                 !marker.optString("city").isBlank() &&
-                Model.normalized(marker.optString("city")).equals(Model.normalized(row.optString("city"))) &&
+                Bilingual.city(marker.optString("city")).equals(Bilingual.city(row.optString("city"))) &&
                 List.of("apartment", "house").contains(marker.optString("kind")) &&
                 marker.optString("kind").equals(row.optString("kind")) &&
                 "sale".equals(row.optString("deal", "sale"));
@@ -304,7 +304,7 @@ final class Ria {
         double price = p.optDouble("price_total", 0);
         if (price <= 0 || currency.isBlank()) return null;
         String actual = p.optString("city_name", city);
-        if (!Model.normalized(actual).equals(Model.normalized(city))) return null;
+        if (!Bilingual.city(actual).equals(Bilingual.city(city))) return null;
         String slug = p.optString("beautiful_url");
         String url = slug.startsWith("https://dom.ria.com/")
             ? slug
