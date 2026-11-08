@@ -56,6 +56,10 @@ adb install android/app/build/outputs/apk/debug/app-debug.apk
 adb install android/app/build/outputs/apk/androidTest/debug/app-debug-androidTest.apk
 adb shell pm grant ua.domtrack.mobile android.permission.POST_NOTIFICATIONS
 adb logcat -c
+adb shell input keyevent 224
+adb shell wm dismiss-keyguard
+adb shell settings put system screen_off_timeout 180000
+adb shell dumpsys power > "$result_dir/startup-power.txt"
 adb shell am start -W -n ua.domtrack.mobile/.MainActivity > "$result_dir/startup.txt"
 sleep 5
 
@@ -67,11 +71,22 @@ out = Path(os.environ['DOMTRACK_SMOKE_DIR'])
 def adb(*args):
     return subprocess.check_output(['adb', *args], timeout=30)
 def capture(name):
-    adb('shell', 'uiautomator', 'dump', '/sdcard/domtrack-smoke.xml')
-    raw = adb('exec-out', 'cat', '/sdcard/domtrack-smoke.xml')
-    (out / (name + '.xml')).write_bytes(raw)
-    (out / (name + '.png')).write_bytes(adb('exec-out', 'screencap', '-p'))
-    return ET.fromstring(raw)
+    failures = []
+    for attempt in range(5):
+        try:
+            adb('shell', 'rm', '-f', '/sdcard/domtrack-smoke.xml')
+            adb('shell', 'uiautomator', 'dump', '/sdcard/domtrack-smoke.xml')
+            raw = adb('exec-out', 'cat', '/sdcard/domtrack-smoke.xml')
+            tree = ET.fromstring(raw)
+            if tree.tag != 'hierarchy':
+                raise AssertionError('Missing UI hierarchy')
+            (out / (name + '.xml')).write_bytes(raw)
+            (out / (name + '.png')).write_bytes(adb('exec-out', 'screencap', '-p'))
+            return tree
+        except (subprocess.CalledProcessError, ET.ParseError, AssertionError) as error:
+            failures.append(str(error))
+            time.sleep(1)
+    raise AssertionError('UI hierarchy unavailable: ' + '; '.join(failures))
 def tap(label):
     tree = capture('before-tap')
     for node in tree.iter('node'):
@@ -172,6 +187,15 @@ try:
     (out / 'RESULT.txt').write_text('PASS: Android 16 cold start, native navigation, real multilingual neural inference and official tokenizer parity, SQLite migration, public RIA example, full search advances beyond four pages while screen off, stop and persistent cursors. No physical Samsung/battery test.\n')
     print('Android 16 native startup, navigation and live search: PASS')
 except Exception as error:
+    for name, args in [('failure-crashes.txt',('logcat','-b','crash','-d')),
+                       ('failure-logcat.txt',('logcat','-d','-t','1000')),
+                       ('failure-power.txt',('shell','dumpsys','power')),
+                       ('failure-window.txt',('shell','dumpsys','window')),
+                       ('failure-screen.png',('exec-out','screencap','-p'))]:
+        try:
+            (out / name).write_bytes(adb(*args))
+        except Exception:
+            pass
     message = str(error).replace('%','%25').replace('\r','%0D').replace('\n','%0A')
     print('::error title=Android runtime smoke::' + message)
     raise
