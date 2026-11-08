@@ -109,6 +109,7 @@ try:
     (out / 'AUTOMATIC-WORKER.txt').write_text(automatic_output)
     if automatic.returncode != 0 or 'FAILURES!!!' in automatic_output or 'INSTRUMENTATION_FAILED' in automatic_output or 'OK (' not in automatic_output:
         raise AssertionError('Automatic Worker regression failed: ' + automatic_output[-10000:])
+    subprocess.run(['python3','android/ci/closed-background.py'],check=True,timeout=1500)
     (out / 'AUTOMATIC-CHECK.png').write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/automatic-check.png'))
     # Test output contains synthetic tokenizer text and aggregate counts only.
     result = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.DeviceUpgradeTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=360)

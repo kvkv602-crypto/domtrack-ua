@@ -32,6 +32,8 @@ RIА API integration, RU/UA matching, existing other sources, on-device duplicat
 
 Pure Java regressions verify global favorites, saved sort/search identity/currency, displayed-price notification suppression and strict OLX detail parsing. Existing Android16 tests continue; new device checks verify changed navigation and workflows on synthetic data, with screenshots for inspection. Map instrumentation validates all-candidate region editing and live coverage. Build/test/lint/signature/alignment evidence is recorded for the delivered APK. User databases and RIA keys are excluded from CI and exports of project sources.
 
+The owner also requested monitoring while the app is closed. Persistent WorkManager scheduling already outlives the Activity and ordinary process death; no resident service is added. The natural 15-minute acceptance test therefore runs in external phases: first catch-up, Activity/task close, instrumentation exit, confirmed process kill without force-stop, screen-off wait, then a periodic refresh recorded in SQLite before any Activity/instrumentation resumes. Android user force-stop, Doze and vendor restrictions remain platform constraints.
+
 ## Signing and delivery
 
 Previous CI debug builds used different disposable signers. Preserve a local signing identity for subsequent owned builds without putting its private key or password into the public repository. The first build with that identity cannot update an APK signed with a different key; backup/restore limitations must be explained before any uninstall. Do not remove an installed app or its data during this work.

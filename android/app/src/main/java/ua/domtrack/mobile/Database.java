@@ -250,6 +250,7 @@ final class Database extends SQLiteOpenHelper {
                 ))
                     if (!r.has(extra) && old.has(extra)) Json.put(r, extra, old.opt(extra));
                 Model.keepKnownFacts(old,r);
+                Ria.keepApiIdentity(old,r,input);
                 Model.keepPriceEvidence(old,r);
                 boolean changed =
                     old == null ||

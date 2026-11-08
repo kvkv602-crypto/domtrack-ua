@@ -56,4 +56,49 @@ public class RiaWatchTest {
         assertFalse(Ria.nativeWatch(publicRow));
         assertThrows(IllegalArgumentException.class, ()->Ria.watched(payload(), publicRow));
     }
+
+    @Test public void verifiedApiIdentitySurvivesPublicObservationWithoutPromotingItsPrice() {
+        JSONObject api=Ria.normalize(payload(), "12345678", "Запоріжжя", "apartment");
+        JSONObject stored=Json.copy(api);
+        Ria.keepApiIdentity(null, stored, api);
+        JSONObject catalog=Json.copy(stored);
+        Json.put(catalog, "source", "domria-web"); catalog.remove("externalId");
+        Json.put(catalog, "price", 16000); Json.put(catalog, "priceEvidence", "display");
+        Ria.keepApiIdentity(stored, catalog, catalog);
+        assertTrue(Ria.nativeWatch(catalog));
+        assertFalse(Model.verifiedPrice(catalog));
+        JSONObject fresh=Ria.watched(payload(), catalog);
+        assertEquals("domria-web", fresh.optString("source"));
+        assertEquals("native", fresh.optString("priceEvidence"));
+        assertEquals(Model.identity(stored), Model.identity(fresh));
+    }
+
+    @Test public void jsonBackupAndPublicInputCannotEstablishApiIdentity() {
+        JSONObject api=Ria.normalize(payload(), "12345678", "Запоріжжя", "apartment");
+        JSONObject stored=Json.copy(api); Ria.keepApiIdentity(null, stored, api);
+        assertNotNull(stored.optJSONObject("riaApiIdentity"));
+        JSONObject backup=Json.copy(stored);
+        Ria.keepApiIdentity(null, backup, backup);
+        assertFalse(backup.has("riaApiIdentity"));
+        JSONObject forged=Json.copy(stored);
+        Json.put(forged, "source", "domria-web");
+        Ria.keepApiIdentity(null, forged, forged);
+        assertFalse(forged.has("riaApiIdentity")); assertFalse(Ria.nativeWatch(forged));
+    }
+
+    @Test public void retainedApiIdentityCannotMoveToAnotherUrlCityKindOrAggregator() {
+        JSONObject api=Ria.normalize(payload(), "12345678", "Запоріжжя", "apartment");
+        JSONObject stored=Json.copy(api); Ria.keepApiIdentity(null, stored, api);
+        for(String field:List.of("url", "city", "kind", "source")) {
+            JSONObject next=Json.copy(stored); Json.put(next, "source", "domria-web");
+            Json.put(next, field, switch(field) {
+                case "url" -> "https://dom.ria.com/uk/realty-87654321.html";
+                case "city" -> "Київ";
+                case "kind" -> "house";
+                default -> "flatfy";
+            });
+            Ria.keepApiIdentity(stored, next, next);
+            assertFalse(field, next.has("riaApiIdentity")); assertFalse(field, Ria.nativeWatch(next));
+        }
+    }
 }

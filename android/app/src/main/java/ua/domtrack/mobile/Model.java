@@ -266,11 +266,23 @@ final class Model {
 
     static void keepKnownFacts(JSONObject previous,JSONObject next) {
         if(previous==null)return;
+        if(known(previous.opt("title"))&&(!known(next.opt("title"))||generatedTitle(next)&&!generatedTitle(previous))) {
+            Json.put(next,"title",previous.opt("title"));
+            if(previous.has("titleEvidence"))Json.put(next,"titleEvidence",previous.opt("titleEvidence"));
+            else next.remove("titleEvidence");
+        }
         for(String key:FACTS)if(!known(next.opt(key))&&known(previous.opt(key)))Json.put(next,key,previous.opt(key));
     }
 
+    private static boolean generatedTitle(JSONObject row) {
+        if("generated".equals(row.optString("titleEvidence")))return true;
+        return "domria".equals(row.optString("source"))&&row.optString("title").equals(
+            ("house".equals(row.optString("kind"))?"Будинок":"Квартира")+" · "+row.optString("city"));
+    }
+
     private static boolean displayOnlySource(String source) {
-        return List.of("olx","domria-web","web:dom.ria.com","web:www.olx.ua","web:olx.ua","web:m.olx.ua").contains(source);
+        return List.of("olx","domria-web","dom.ria.com","dim.ria.com","www.olx.ua","olx.ua","m.olx.ua",
+            "web:dom.ria.com","web:dim.ria.com","web:www.olx.ua","web:olx.ua","web:m.olx.ua").contains(source.toLowerCase(Locale.ROOT));
     }
 
     static void keepPriceEvidence(JSONObject previous,JSONObject next) {
@@ -283,6 +295,7 @@ final class Model {
         for(String key:FACTS) {
             // CDN resizing/transport URLs do not prove a change in the property.
             if(key.equals("image"))continue;
+            if(key.equals("title")&&(generatedTitle(before)||generatedTitle(after)))continue;
             Object a=before.opt(key),b=after.opt(key);
             if(!known(a)||!known(b))continue;
             if(a instanceof Number&&b instanceof Number) { if(Double.compare(((Number)a).doubleValue(),((Number)b).doubleValue())!=0)return true; }

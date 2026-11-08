@@ -716,6 +716,10 @@ final class Sources {
         Document doc = Jsoup.parse(html, url);
         List<JSONObject> out = new ArrayList<>(RiaPage.parse(doc, url));
         if (!out.isEmpty()) return out;
+        // Generic JSON-LD can describe a recommended property. For RIA it must not be
+        // relabelled with this page's URL after the linked-product binding failed.
+        if (List.of("dom.ria.com", "dim.ria.com").contains(Objects.toString(URI.create(url).getHost(), "").toLowerCase(Locale.ROOT)))
+            throw new IllegalArgumentException("RIA: структурированные данные не привязаны к этому объявлению. Можно открыть оригинал или добавить объект вручную.");
         for (Element e : doc.select("script[type=application/ld+json]"))
             try {
                 collectLd(new JSONTokener(e.data()).nextValue(), url, out);

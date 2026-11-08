@@ -16,6 +16,16 @@ final class Ria {
     private static final Pattern LISTING_PATH = Pattern.compile(
         "/(?:uk/)?realty-(?:[a-z0-9]+-)*([1-9][0-9]{0,11})\\.html"
     );
+    private static final String API_IDENTITY = "riaApiIdentity";
+
+    // JSON imports cannot manufacture this in-memory proof that normalization saw an API payload.
+    private static final class ApiObservation extends JSONObject {
+        final String externalId, city, kind;
+        ApiObservation(JSONObject row) {
+            externalId=row.optString("externalId"); city=row.optString("city"); kind=row.optString("kind");
+            for (String key : Json.keys(row)) Json.put(this, key, row.opt(key));
+        }
+    }
 
     Ria(Context c, Database d) throws Exception {
         this(c, d, new Network());
@@ -93,7 +103,41 @@ final class Ria {
     }
 
     static boolean nativeWatch(JSONObject row) {
-        return row != null && "domria".equals(row.optString("source"));
+        return row != null && ("domria".equals(row.optString("source")) || storedApiIdentity(row) != null);
+    }
+
+    private static boolean sameApiTarget(JSONObject marker, JSONObject row) {
+        try {
+            String id=marker.optString("externalId");
+            return id.matches("[1-9][0-9]{0,11}") && id.equals(listingId(row.optString("url"))) &&
+                marker.optString("listingId").equals(Model.identity(row)) &&
+                !marker.optString("city").isBlank() &&
+                Model.normalized(marker.optString("city")).equals(Model.normalized(row.optString("city"))) &&
+                List.of("apartment", "house").contains(marker.optString("kind")) &&
+                marker.optString("kind").equals(row.optString("kind")) &&
+                "sale".equals(row.optString("deal", "sale"));
+        } catch (Exception e) { return false; }
+    }
+
+    private static JSONObject storedApiIdentity(JSONObject row) {
+        if (row == null) return null;
+        JSONObject marker=row.optJSONObject(API_IDENTITY);
+        return marker != null && sameApiTarget(marker, row) ? marker : null;
+    }
+
+    static void keepApiIdentity(JSONObject previous, JSONObject next, JSONObject input) {
+        // Treat every incoming JSON marker as untrusted, including backups of native observations.
+        next.remove(API_IDENTITY);
+        JSONObject marker=null;
+        if (input instanceof ApiObservation api && "native".equals(next.optString("priceEvidence")) &&
+            api.externalId.equals(next.optString("externalId")) && api.city.equals(next.optString("city")) &&
+            api.kind.equals(next.optString("kind"))) {
+            JSONObject confirmed=Json.object("externalId", api.externalId, "city", api.city, "kind", api.kind,
+                "listingId", Model.identity(next));
+            if (sameApiTarget(confirmed, next)) marker=confirmed;
+        }
+        if (marker == null) marker=storedApiIdentity(previous);
+        if (marker != null && sameApiTarget(marker, next)) Json.put(next, API_IDENTITY, Json.copy(marker));
     }
 
     private static String listingId(String value) {
@@ -106,7 +150,8 @@ final class Ria {
     }
 
     private static String watchId(JSONObject previous) {
-        String id = previous.optString("externalId");
+        JSONObject marker=storedApiIdentity(previous);
+        String id = marker == null ? previous.optString("externalId") : marker.optString("externalId");
         if (!nativeWatch(previous) || !id.matches("[1-9][0-9]{0,11}") ||
             !id.equals(listingId(previous.optString("url"))) || previous.optString("city").isBlank() ||
             !List.of("apartment", "house").contains(previous.optString("kind")) ||
@@ -137,6 +182,7 @@ final class Ria {
         // The API has confirmed the original externalId, city and kind. A renamed beautiful_url
         // must update that listing's existing history rather than create a different Model key.
         Json.put(fresh, "url", previous.optString("url"));
+        Json.put(fresh, "source", previous.optString("source"));
         Model.validate(fresh);
         return fresh;
     }
@@ -275,6 +321,8 @@ final class Ria {
             url,
             "title",
             (kind.equals("house") ? "Будинок" : "Квартира") + " · " + actual,
+            "titleEvidence",
+            "generated",
             "city",
             actual,
             "kind",
@@ -319,6 +367,6 @@ final class Ria {
             "district",
             p.optString("admin_district_name_uk", p.optString("district_name"))
         );
-        return r;
+        return !p.optString("city_name").isBlank() && id.equals(listingId(url)) ? new ApiObservation(r) : r;
     }
 }

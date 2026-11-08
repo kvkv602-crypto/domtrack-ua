@@ -102,6 +102,14 @@ public class ListingWatchTest {
             "<div class='catalog-items-container'>" + card("11111", "10000") + card("11111", "11000") + "</div>", previous.optString("catalogUrl"), previous));
     }
 
+    @Test public void riaReaderCannotStampAnUnboundRecommendationAsTheRequestedObject() {
+        String html="<script type='application/ld+json'>{\"@type\":\"Apartment\",\"url\":\"https://dom.ria.com/uk/realty-prodaja-kvartira-other-87654321.html\",\"name\":\"Other listing\",\"offers\":{\"businessFunction\":\"Sell\",\"price\":1,\"priceCurrency\":\"USD\"},\"address\":{\"addressLocality\":\"Запоріжжя\"}}</script>";
+        for(String host:List.of("dom.ria.com","dim.ria.com","DOM.RIA.COM","DIM.RIA.COM")) {
+            String target="https://"+host+"/uk/realty-prodaja-kvartira-training-12345678.html";
+            assertThrows(IllegalArgumentException.class,()->Sources.importRecords(html,target,target));
+        }
+    }
+
     @Test public void structuredWatchCannotBorrowAnotherStructuredObject() {
         JSONObject previous = rieltorPrevious();
         Json.put(previous, "structured", true);

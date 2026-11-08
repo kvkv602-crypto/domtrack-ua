@@ -66,4 +66,27 @@ public class WorkspaceTest {
         Model.keepPriceEvidence(Json.object("source","training","priceEvidence","display"),sparse);assertEquals("display",sparse.optString("priceEvidence"));
         Model.keepPriceEvidence(web,api);assertTrue(Model.verifiedPrice(api));
     }
+    @Test public void publicJsonLdHostSourcesCannotClaimNativeSellerPrice() {
+        JSONObject api=Json.object("source","domria","priceEvidence","native","price",15000,"currency","USD");
+        for(String source:List.of("dom.ria.com","dim.ria.com","www.olx.ua","olx.ua","m.olx.ua","web:dim.ria.com","DOM.RIA.COM","WWW.OLX.UA")) {
+            JSONObject imported=Json.object("source",source,"price",14000,"currency","USD");
+            assertFalse(source,Model.verifiedPrice(imported));
+            Model.keepPriceEvidence(api,imported);
+            assertEquals(source,"display",imported.optString("priceEvidence"));
+            assertFalse(Model.eventTypes(api,imported,true,Json.object("target",14500,"currency","USD"),new JSONObject()).contains("threshold"));
+        }
+    }
+    @Test public void apiGeneratedTitlesDoNotReplaceRealHeadlinesOrCreateObjectAlerts() {
+        JSONObject api=Json.object("source","domria","title","Квартира · Запоріжжя","titleEvidence","generated","city","Запоріжжя","kind","apartment","price",14500,"currency","USD");
+        JSONObject catalog=Json.object("source","domria-web","title","Продаж квартири на вулиці Навчальній","city","Запоріжжя","kind","apartment","price",14500,"currency","USD");
+        assertFalse(Model.eventTypes(api,catalog,true,null,new JSONObject()).contains("object"));
+        JSONObject fresh=Json.copy(api);Model.keepKnownFacts(catalog,fresh);
+        assertEquals(catalog.optString("title"),fresh.optString("title"));
+        assertFalse(fresh.has("titleEvidence"));
+        assertFalse(Model.eventTypes(catalog,fresh,true,null,new JSONObject()).contains("object"));
+        JSONObject legacy=Json.copy(api);legacy.remove("titleEvidence");
+        assertFalse(Model.eventTypes(legacy,catalog,true,null,new JSONObject()).contains("object"));
+        JSONObject renamed=Json.copy(catalog);Json.put(renamed,"title","Изменённый содержательный заголовок");
+        assertTrue(Model.eventTypes(catalog,renamed,true,null,new JSONObject()).contains("object"));
+    }
 }
