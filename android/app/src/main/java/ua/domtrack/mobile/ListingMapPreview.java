@@ -28,7 +28,7 @@ final class ListingMapPreview {
             return;
         }
         Preview preview = new Preview(context, new LatLng(row.optDouble("latitude"), row.optDouble("longitude")),
-            openFullMap);
+            MapPresentation.precision(row) == MapPresentation.Precision.APPROXIMATE ? 13 : 16, openFullMap);
         LinearLayout.LayoutParams mapLayout = new LinearLayout.LayoutParams(-1, dp(context, 220));
         mapLayout.setMargins(0, dp(context, 8), 0, 0);
         parent.addView(preview, mapLayout);
@@ -67,6 +67,7 @@ final class ListingMapPreview {
 
     private static final class Preview extends FrameLayout implements ViewTreeObserver.OnPreDrawListener {
         private final LatLng sourcePoint;
+        private final double cameraZoom;
         private final Rect visible = new Rect();
         private final PointOverlay point;
         private final TextView status;
@@ -77,9 +78,10 @@ final class ListingMapPreview {
         private int generation;
         private String style = "bright";
 
-        Preview(Context context, LatLng sourcePoint, Runnable openFullMap) {
+        Preview(Context context, LatLng sourcePoint, double cameraZoom, Runnable openFullMap) {
             super(context);
             this.sourcePoint = sourcePoint;
+            this.cameraZoom = cameraZoom;
             setContentDescription("Карта расположения объекта");
             setBackgroundColor(PALE);
             status = caption(context, "Карта расположения объекта");
@@ -155,7 +157,8 @@ final class ListingMapPreview {
                 .state("mapUi", new JSONObject());
             String requestedStyle = preferences.optString("style", "bright");
             style = List.of("bright", "positron", "liberty").contains(requestedStyle) ? requestedStyle : "bright";
-            CameraPosition camera = new CameraPosition.Builder().target(sourcePoint).zoom(16).tilt(45).build();
+            CameraPosition camera = new CameraPosition.Builder().target(sourcePoint).zoom(cameraZoom)
+                .tilt(cameraZoom < 14.5 ? 0 : 45).build();
             MapLibreMapOptions options = MapLibreMapOptions.createFromAttributes(getContext())
                 .textureMode(true).camera(camera).compassEnabled(false).logoEnabled(false).attributionEnabled(false)
                 .scrollGesturesEnabled(false).zoomGesturesEnabled(false).rotateGesturesEnabled(false)
