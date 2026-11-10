@@ -60,12 +60,7 @@ final class OlxPage {
                 "observedAt",
                 Model.now()
             );
-            Element image = card.selectFirst("img[src]");
-            if (image != null && image.absUrl("src").startsWith("https://")) Json.put(
-                r,
-                "image",
-                image.absUrl("src")
-            );
+            ListingPhotos.card(card, r);
             records.add(r);
         }
         if (records.isEmpty()) throw new IllegalArgumentException(

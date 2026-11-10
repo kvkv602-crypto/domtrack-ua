@@ -288,13 +288,7 @@ final class AggregatorPages {
             "description",
             description.length() > 18000 ? description.substring(0, 18000) : description
         );
-        for (JSONObject image : Json.objects(card.optJSONArray("images"))) {
-            String src = image.optString("url");
-            if (src.startsWith("https://")) {
-                Json.put(r, "image", src);
-                break;
-            }
-        }
+        ListingPhotos.metadata(r, card.opt("images"), url);
         try {
             Model.validate(r);
             return r;

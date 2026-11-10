@@ -107,11 +107,8 @@ final class RiaPage {
         ).matcher(title);
         if (address.find()) Json.put(record, "address", address.group(1).trim());
         Sources.walkLd(property, record, true);
-        if (offerProduct.optString("image").startsWith("https://")) Json.put(
-            record,
-            "image",
-            offerProduct.optString("image")
-        );
+        ListingPhotos.metadata(record, offerProduct.opt("image"), url);
+        ListingPhotos.metadata(record, property.opt("image"), url);
         JSONObject seller = offer.optJSONObject("seller");
         Json.put(
             record,

@@ -367,6 +367,9 @@ final class Ria {
             "district",
             p.optString("admin_district_name_uk", p.optString("district_name"))
         );
+        ListingPhotos.metadata(r, p.opt("image"), url);
+        ListingPhotos.metadata(r, p.opt("main_photo"), url);
+        ListingPhotos.metadata(r, p.opt("photos"), url);
         return !p.optString("city_name").isBlank() && id.equals(listingId(url)) ? new ApiObservation(r) : r;
     }
 }

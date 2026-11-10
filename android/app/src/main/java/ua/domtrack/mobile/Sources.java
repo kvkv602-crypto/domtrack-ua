@@ -583,11 +583,7 @@ final class Sources {
                 "sellerType",
                 "agent"
             );
-            Element image = card.selectFirst("img[src]");
-            if (image != null) {
-                String src = image.absUrl("src");
-                if (src.startsWith("https://")) Json.put(r, "image", src);
-            }
+            ListingPhotos.card(card, r);
             Json.put(
                 r,
                 "description",
@@ -793,6 +789,7 @@ final class Sources {
         JSONObject area = o.optJSONObject("floorSize");
         if (area != null) Json.put(r, "area", area.optDouble("value"));
         if (o.has("numberOfRooms")) Json.put(r, "rooms", o.optInt("numberOfRooms"));
+        ListingPhotos.metadata(r, o.opt("image"), url);
         walkLd(o, r, true);
         Model.validate(r);
         out.add(r);

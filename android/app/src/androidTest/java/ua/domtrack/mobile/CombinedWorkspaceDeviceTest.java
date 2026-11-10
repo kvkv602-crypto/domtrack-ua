@@ -25,6 +25,9 @@ public class CombinedWorkspaceDeviceTest {
         JSONObject settings=Json.copy(oldSettings);Json.put(settings,"background",false);db.saveState("settings",settings);
         db.saveState("currentFilters",Json.object("city","Київ","kind","house","priceMax",1,"query","неподходящие условия","currency","USD"));
         JSONObject row=Json.object("source","training","url","https://example.org/combined-workspace","title","Учебное избранное в Запорожье","city","Запоріжжя","region","Запорізька","kind","apartment","deal","sale","period","total","price",14500,"currency","USD","rooms",2,"floor",4,"floorsTotal",5,"observedAt",Model.now());
+        Json.put(row,"address","Тестовая улица, 12");Json.put(row,"area",47.5);
+        Json.put(row,"description","<p>Светлая квартира</p><p>Балкон и отдельная кухня.</p>");
+        Json.put(row,"sellerType","owner");Json.put(row,"contactPhone","+380000000000");
         db.ingest(List.of(row),false);id=Model.identity(row);db.local(id,"favorite",true);db.local(id,"hidden",false);db.local(id,"watch",Json.object("enabled",false,"target",14000,"currency","USD"));
         activity=instrumentation().startActivitySync(new Intent(c,MainActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK|Intent.FLAG_ACTIVITY_CLEAR_TOP));
         instrumentation().waitForIdleSync();
@@ -100,5 +103,32 @@ public class CombinedWorkspaceDeviceTest {
         UiDevice device=UiDevice.getInstance(instrumentation());assertTrue(device.wait(Until.hasObject(By.text("Карта этого объекта")),5000));
         assertTrue(device.takeScreenshot(new File(activity.getFilesDir(),"combined-details.png")));
         JSONObject report=db.state("combinedWorkspaceDeviceTest",new JSONObject());Json.put(report,"selectedReturnKeepsSearch",true);db.saveState("combinedWorkspaceDeviceTest",report);
+    }
+
+    @Test public void listingDetailsExposeSourceDescriptionAndBuildingFacts() throws Exception {
+        java.lang.reflect.Method detail=MainActivity.class.getDeclaredMethod("detail",String.class);detail.setAccessible(true);
+        java.lang.reflect.Field opened=MainActivity.class.getDeclaredField("openedListingDialog");opened.setAccessible(true);
+        instrumentation().runOnMainSync(()->{
+            try {
+                detail.invoke(activity,id);
+                AlertDialog dialog=(AlertDialog)opened.get(activity);
+                View view=dialog.getWindow().getDecorView();
+                assertNotNull(find(view,"training"));
+                assertNotNull(find(view,"Описание"));
+                assertNotNull(find(view,"Город: Запоріжжя\nПродавец: Хозяин"));
+                assertNotNull(find(view,"Позвонить: +380000000000"));
+                assertTrue(containsText(view,"Светлая квартира"));
+                assertTrue(containsText(view,"Балкон и отдельная кухня."));
+                assertTrue(containsText(view,"Этажей в доме: 5"));
+                assertTrue(containsText(view,"Тестовая улица, 12"));
+            } catch(Exception e) { throw new AssertionError(e); }
+        });
+        assertTrue(UiDevice.getInstance(instrumentation()).takeScreenshot(new File(activity.getFilesDir(),"combined-full-details.png")));
+    }
+
+    private boolean containsText(View root,String text) {
+        if(root instanceof TextView&&((TextView)root).getText().toString().contains(text))return true;
+        if(root instanceof ViewGroup)for(int i=0;i<((ViewGroup)root).getChildCount();i++)if(containsText(((ViewGroup)root).getChildAt(i),text))return true;
+        return false;
     }
 }

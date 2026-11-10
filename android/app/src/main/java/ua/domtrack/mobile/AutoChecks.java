@@ -76,6 +76,10 @@ final class AutoChecks {
     }
 
     static void targetsChanged(Context context, Database db) {
+        targetsChanged(context, db, true);
+    }
+
+    static void targetsChanged(Context context, Database db, boolean requestCatchUp) {
         JSONObject state = db.state("autoCheck", new JSONObject());
         if (state.optString("status").equals("waiting")) {
             Json.put(state, "retryAfterMillis", 0);
@@ -83,7 +87,7 @@ final class AutoChecks {
             db.saveState("autoCheck", state);
         }
         schedule(context, db);
-        catchUpIfDue(context, db);
+        if (requestCatchUp) catchUpIfDue(context, db);
     }
 
     static String time(String value) {

@@ -100,7 +100,8 @@ def run(out):
             "activityClosedBeforeKill": True,
             "instrumentationExitedBeforeKill": True,
             "forceStopUsed": False,
-            "manualSearchButtonPressed": False,
+            "manualSearchButtonPressedDuringWait": False,
+            "currentTargetRegisteredBySearch": bool(fixture.get("currentTargetRegisteredBySearch")),
             "forcedJobUsed": False,
             "intervalMillis": 900000,
         }

@@ -394,7 +394,7 @@ public class DeviceUpgradeTest {
         try {
             activity = startSelectedMap(c, selectedId, unrelatedSearch);
             awaitVisibleCoordinates(activity, new double[][] { { 49.8397, 24.0297 } });
-            awaitCamera(activity, 49.8397, 24.0297, 15);
+            awaitCamera(activity, 49.8397, 24.0297, 16);
             java.lang.reflect.Field rows = MapActivity.class.getDeclaredField("listings"),
                 quality = MapActivity.class.getDeclaredField("selectedQuality"),
                 address = MapActivity.class.getDeclaredField("selectedAddress"),
@@ -543,6 +543,8 @@ public class DeviceUpgradeTest {
             Thread.sleep(8000);
             assertTrue("Foreground search did not start", SearchService.RUNNING.get());
             int before = pages(db);
+            instrumentation.runOnMainSync(activity::finishAndRemoveTask);
+            device.pressHome();
             device.sleep();
             Thread.sleep(16000);
             assertFalse("Screen should remain off", device.isScreenOn());
@@ -560,7 +562,8 @@ public class DeviceUpgradeTest {
             );
             db.saveState(
                 "screenOffTest",
-                Json.object("pagesBefore", before, "pagesAfter", after, "screenStayedOff", true)
+                Json.object("pagesBefore", before, "pagesAfter", after, "screenStayedOff", true,
+                    "activityTaskRemoved", true)
             );
         } finally {
             SearchService.stop(c);

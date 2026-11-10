@@ -152,6 +152,12 @@ final class Database extends SQLiteOpenHelper {
         saveState("searches", Json.object("items", Json.array(rows)));
     }
 
+    synchronized JSONObject saveCurrentSearch(JSONObject filters) {
+        JSONObject current = CurrentSearch.snapshot(searches(), filters);
+        saveSearch(current);
+        return Json.copy(current);
+    }
+
     synchronized void deleteSearch(String id) {
         List<JSONObject> rows = searches();
         rows.removeIf(r -> r.optString("id").equals(id));
@@ -241,6 +247,7 @@ final class Database extends SQLiteOpenHelper {
                     if (old.has(key)) Json.put(r, key, old.opt(key));
                 if (old != null) for (String extra : List.of(
                     "structured",
+                    "remotePhotos",
                     "catalogUrl",
                     "catalogPage",
                     "latitude",

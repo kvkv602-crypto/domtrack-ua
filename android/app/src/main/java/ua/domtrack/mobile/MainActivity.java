@@ -44,7 +44,7 @@ public class MainActivity extends Activity {
     private boolean resumed;
     private String pendingPhotoListing;
     private final int INK = Color.rgb(27, 43, 59),
-        GREEN = Color.rgb(19, 125, 102),
+        GREEN = Color.rgb(25, 92, 197),
         MUTED = Color.rgb(100, 116, 135),
         BG = Color.rgb(245, 247, 250);
 
@@ -186,13 +186,55 @@ public class MainActivity extends Activity {
         b.setText(label);
         b.setAllCaps(false);
         b.setTextColor(GREEN);
-        b.setMinHeight(dp(44));
+        b.setTextSize(14);
+        b.setMinHeight(dp(48));
+        b.setPadding(dp(10), dp(6), dp(10), dp(6));
+        b.setStateListAnimator(null);
+        buttonFace(b, false);
         b.setOnClickListener(v -> action.run());
         return b;
     }
 
+    private void buttonFace(Button b, boolean primary) {
+        GradientDrawable face = new GradientDrawable();
+        face.setColor(primary ? GREEN : Color.rgb(238, 244, 253));
+        face.setCornerRadius(dp(12));
+        b.setBackground(new android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(Color.argb(35, 25, 92, 197)), face, null));
+        b.setTextColor(primary ? Color.WHITE : GREEN);
+    }
+
+    private String sourceName(String source) {
+        switch (source) {
+            case "domria": case "domria-web": case "ria": return "DIM.RIA";
+            case "olx": return "OLX";
+            case "rieltor": return "Rieltor.ua";
+            case "lun": return "ЛУН";
+            case "flatfy": return "Flatfy";
+            case "obyava": return "OBYAVA";
+            case "domik": return "Domik.ua";
+            default: return source.isBlank() ? "Источник не указан" : source;
+        }
+    }
+
+    private TextView badge(String value) {
+        TextView label = text(value, 12, GREEN);
+        label.setTypeface(null, Typeface.BOLD);
+        label.setPadding(dp(10), dp(5), dp(10), dp(5));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(Color.rgb(238, 244, 253));
+        bg.setCornerRadius(dp(8));
+        label.setBackground(bg);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.setMargins(0, dp(6), 0, dp(6));
+        label.setLayoutParams(lp);
+        return label;
+    }
+
     private void addButton(LinearLayout parent, String label, Runnable action) {
-        parent.addView(button(label, action), new LinearLayout.LayoutParams(-1, -2));
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.setMargins(0, dp(3), 0, dp(3));
+        parent.addView(button(label, action), lp);
     }
 
     private LinearLayout card() {
@@ -220,7 +262,9 @@ public class MainActivity extends Activity {
             v.setPadding(dp(16) + bars.left, dp(8) + bars.top, dp(16) + bars.right, bars.bottom);
             return insets;
         });
-        root.addView(heading("DomTrack UA"));
+        TextView brand = heading("DomTrack UA");
+        brand.setTextColor(GREEN);
+        root.addView(brand);
         status = text("Самостоятельный поиск · данные на телефоне", 12, MUTED);
         root.addView(status);
         ScrollView scroll = new ScrollView(this);
@@ -252,8 +296,7 @@ public class MainActivity extends Activity {
             Button item=(Button)nav.getChildAt(i);
             boolean selected=item.getText().toString().equals(tab)||(tab.equals("События")&&item.getText().toString().equals("Слежение"));
             item.setTypeface(null,selected?Typeface.BOLD:Typeface.NORMAL);
-            item.setTextColor(selected?Color.WHITE:GREEN);
-            item.setBackgroundTintList(android.content.res.ColorStateList.valueOf(selected?GREEN:Color.rgb(235,244,240)));
+            buttonFace(item, selected);
         }
         body.removeAllViews();
         switch (tab) {
@@ -315,6 +358,9 @@ public class MainActivity extends Activity {
                             : filters.optString("kind").equals("apartment")
                                 ? "квартиры"
                                 : "квартиры и дома") +
+                    (filters.has("priceMin")
+                            ? " · от " + fmt(filters.optDouble("priceMin")) + " " + filters.optString("currency")
+                            : "") +
                     (filters.has("priceMax")
                             ? " · до " +
                             fmt(filters.optDouble("priceMax")) +
@@ -327,11 +373,13 @@ public class MainActivity extends Activity {
         );
         if (!favorites) {
             LinearLayout scan = row();
+            Button searchButton = button(SearchService.RUNNING.get() ? "Остановить" : "Поиск", () -> {
+                if (SearchService.RUNNING.get()) SearchService.stop(this);
+                else startScan(true);
+            });
+            buttonFace(searchButton, true);
             scan.addView(
-                button(SearchService.RUNNING.get() ? "Остановить" : "Поиск", () -> {
-                    if (SearchService.RUNNING.get()) SearchService.stop(this);
-                    else startScan(true);
-                }),
+                searchButton,
                 new LinearLayout.LayoutParams(0, -2, 1)
             );
             scan.addView(
@@ -393,10 +441,14 @@ public class MainActivity extends Activity {
         }
         for (JSONObject r : rows.subList(0, Math.min(visibleCount, rows.size()))) {
             LinearLayout box = card();
+            RemotePhotos.addThumbnail(box, r);
+            box.addView(badge(sourceName(r.optString("source"))));
             TextView p = text(price(r), 21, GREEN);
             p.setTypeface(null, Typeface.BOLD);
             box.addView(p);
             box.addView(text(r.optString("title"), 17, INK));
+            if (!r.optString("address").isBlank()) box.addView(text(
+                r.optString("city") + " · " + r.optString("address"), 14, INK));
             box.addView(text(spec(r), 13, MUTED));
             if (!Model.verifiedPrice(r)) box.addView(text("Цена показана площадкой · исходная валюта продавца не подтверждена",11,MUTED));
             if (r.has("probableAlternatives")) {
@@ -425,7 +477,7 @@ public class MainActivity extends Activity {
             }
             box.addView(
                 text(
-                    r.optString("source") + " · проверено " + shortDate(r.optString("lastSeen")),
+                    "Проверено " + shortDate(r.optString("lastSeen")),
                     11,
                     MUTED
                 )
@@ -581,8 +633,8 @@ public class MainActivity extends Activity {
         );
         Map<String, EditText> fields = new LinkedHashMap<>();
         String[][] definitions = {
-            { "priceMin", "Цена от" },
-            { "priceMax", "Цена до" },
+            { "priceMin", "Цена от — минимум" },
+            { "priceMax", "Цена до — максимум" },
             { "roomsMin", "Комнат от" },
             { "roomsMax", "Комнат до" },
             { "areaMin", "Площадь от, м²" },
@@ -592,8 +644,17 @@ public class MainActivity extends Activity {
             { "floorsTotalMin", "Этажность здания от" },
             { "floorsTotalMax", "Этажность здания до" },
         };
-        for (String[] def : definitions)
-            fields.put(def[0], input(form, def[1], filters.optString(def[0], ""), true));
+        for (int i = 0; i < definitions.length; i += 2) {
+            LinearLayout pair = row();
+            for (int j = i; j < i + 2; j++) {
+                LinearLayout half = column();
+                half.setPadding(j == i ? 0 : dp(6), 0, j == i ? dp(6) : 0, 0);
+                String[] def = definitions[j];
+                fields.put(def[0], input(half, def[1], filters.optString(def[0], ""), true));
+                pair.addView(half, new LinearLayout.LayoutParams(0, -2, 1));
+            }
+            form.addView(pair);
+        }
         Spinner seller = select(
             form,
             "Продавец",
@@ -727,21 +788,16 @@ public class MainActivity extends Activity {
             toast("Поиск уже выполняется");
             return;
         }
-        if (db.searches().isEmpty()) db.saveSearch(
-            Json.object(
-                "name",
-                filters.optString("city"),
-                "enabled",
-                true,
-                "filters",
-                Json.copy(filters)
-            )
-        );
         requestNotifications();
         try {
-            ((DomTrackApp) getApplication()).schedule();
+            JSONObject observation = db.saveCurrentSearch(filters);
+            // The explicit service performs this scan; it schedules catch-up after releasing its gate.
+            AutoChecks.targetsChanged(this, db, false);
             SearchService.start(this, Json.copy(filters));
-            status.setText("Полный поиск · можно выключить экран");
+            boolean automatic = db.state("settings", new JSONObject()).optBoolean("background", true)
+                && observation.optBoolean("enabled", true);
+            status.setText("Полный поиск · можно выключить экран · автопроверка " +
+                (automatic ? "включена" : "приостановлена"));
         } catch (Exception e) {
             toast("Поиск не запущен: " + Scanner.safe(e));
         }
@@ -790,15 +846,27 @@ public class MainActivity extends Activity {
         if(openedListingDialog!=null)openedListingDialog.dismiss();
         openedListingId=id;
         LinearLayout content = column();
+        RemotePhotos.addGallery(content, r);
+        content.addView(badge(sourceName(r.optString("source"))));
         content.addView(heading(price(r)));
         content.addView(text(r.optString("title"), 19, INK));
         content.addView(text(spec(r) + "\n" + r.optString("address"), 15, MUTED));
+        ListingMapPreview.add(content, r, () -> mapListing(r));
         addButton(content,"Карта этого объекта",()->mapListing(r));
+        content.addView(badge("Характеристики"));
+        content.addView(text("Город: " + r.optString("city") +
+            (r.optString("district").isBlank() ? "" : "\nРайон: " + r.optString("district")) +
+            "\nПродавец: " + sellerName(r.optString("sellerType")), 14, INK));
+        String description = org.jsoup.Jsoup.parse(r.optString("description").replace("\n", "<br>")).wholeText().trim();
+        if (!description.isBlank()) {
+            content.addView(badge("Описание"));
+            content.addView(text(description, 15, INK));
+        }
         if (!Model.verifiedPrice(r)) content.addView(text("Это отображаемая цена площадки. Она сохраняется в истории, но не подтверждает изменение исходной цены продавца; уведомления о снижении и пороге по ней не создаются.",13,MUTED));
         content.addView(
             text(
                 "Источник: " +
-                    r.optString("source") +
+                    sourceName(r.optString("source")) +
                     "\nВпервые замечено: " +
                     shortDate(r.optString("firstSeen")) +
                     "\nПоследняя проверка: " +
@@ -824,6 +892,8 @@ public class MainActivity extends Activity {
                 MUTED
             )
         );
+        if (!r.optString("contactEmail").isBlank()) content.addView(text("Email: " + r.optString("contactEmail"), 14, INK));
+        content.addView(badge("Моё наблюдение"));
         addButton(
             content,
             r.optBoolean("favorite") ? "Убрать из избранного" : "Добавить в избранное",
@@ -934,6 +1004,17 @@ public class MainActivity extends Activity {
         openedListingDialog=details;
         details.setOnDismissListener(d->{if(openedListingDialog==details){openedListingDialog=null;openedListingId="";}});
         details.show();
+        if (details.getWindow() != null) details.getWindow().setLayout(
+            WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT);
+    }
+
+    private String sellerName(String value) {
+        switch (value) {
+            case "owner": return "Хозяин";
+            case "developer": return "Застройщик";
+            case "agent": return "Риелтор";
+            default: return "Не указан источником";
+        }
     }
 
     private void threshold(String id, JSONObject r) {
@@ -1060,26 +1141,31 @@ public class MainActivity extends Activity {
         for (JSONObject s : db.searches()) {
             LinearLayout box = card();
             box.addView(text(s.optString("name"), 17, INK));
+            if (CurrentSearch.isCurrent(s)) box.addView(text(
+                "Параметры обновляются кнопкой «Поиск». Выключи переключатель, чтобы приостановить автопроверку.", 12, MUTED));
             Switch active = new Switch(this);
             active.setText("Проверять и уведомлять");
             active.setChecked(s.optBoolean("enabled", true));
             active.setOnCheckedChangeListener((v, on) -> {
-                Json.put(s, "enabled", on);
-                db.saveSearch(s);
+                JSONObject latest = db.searches().stream().filter(row ->
+                    row.optString("id").equals(s.optString("id"))).findFirst().orElse(null);
+                if (latest == null) return;
+                Json.put(latest, "enabled", on);
+                db.saveSearch(latest);
                 AutoChecks.targetsChanged(this, db);
             });
             box.addView(active);
             addButton(box, "Открыть поиск", () -> {
-                activeSavedSearchId=s.optString("id");
+                activeSavedSearchId=CurrentSearch.isCurrent(s)?"":s.optString("id");
                 filters = Json.copy(s.optJSONObject("filters"));
                 db.saveState("currentFilters", filters);
                 tab = "Поиск";
                 render();
             });
-            addButton(box,"Изменить фильтры и название",()->{
-                activeSavedSearchId=s.optString("id");filters=Json.copy(s.optJSONObject("filters"));db.saveState("currentFilters",filters);tab="Поиск";render();filterDialog();
+            addButton(box,CurrentSearch.isCurrent(s)?"Изменить параметры":"Изменить фильтры и название",()->{
+                activeSavedSearchId=CurrentSearch.isCurrent(s)?"":s.optString("id");filters=Json.copy(s.optJSONObject("filters"));db.saveState("currentFilters",filters);tab="Поиск";render();filterDialog();
             });
-            addButton(box, "Удалить поиск", () -> {
+            if (!CurrentSearch.isCurrent(s)) addButton(box, "Удалить поиск", () -> {
                 db.deleteSearch(s.optString("id"));
                 if(activeSavedSearchId.equals(s.optString("id")))activeSavedSearchId="";
                 AutoChecks.targetsChanged(this, db);

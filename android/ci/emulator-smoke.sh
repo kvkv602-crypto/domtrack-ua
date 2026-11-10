@@ -138,13 +138,22 @@ try:
     (out / 'COMBINED-WORKSPACE.txt').write_text(combined_output)
     if combined.returncode != 0 or 'FAILURES!!!' in combined_output or 'INSTRUMENTATION_FAILED' in combined_output or 'OK (' not in combined_output:
         raise AssertionError('Combined workspace device tests failed: ' + combined_output[-10000:])
-    for image in ['combined-favorites.png','combined-tracking.png','combined-details.png']:
+    for image in ['combined-favorites.png','combined-tracking.png','combined-details.png','combined-full-details.png']:
         (out / image).write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/'+image))
     reader = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.ListingBrowserDeviceTest','ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=180)
     reader_output = reader.stdout.decode(errors='replace') + reader.stderr.decode(errors='replace')
     (out / 'PUBLIC-READER.txt').write_text(reader_output)
     if reader.returncode != 0 or 'FAILURES!!!' in reader_output or 'INSTRUMENTATION_FAILED' in reader_output or 'OK (' not in reader_output:
         raise AssertionError('Public listing reader device tests failed: ' + reader_output[-10000:])
+    for test_class, report_name in [('CurrentSearchDeviceTest','CURRENT-SEARCH.txt'),('MapPriceDeviceTest','MAP-PRICE-GROUPS.txt'),('ListingMapPreviewDeviceTest','LISTING-MAP-PREVIEW.txt'),('RemotePhotosDeviceTest','REMOTE-PHOTOS.txt')]:
+        result = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.'+test_class,'ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=240)
+        output = result.stdout.decode(errors='replace') + result.stderr.decode(errors='replace')
+        (out / report_name).write_text(output)
+        if result.returncode != 0 or 'FAILURES!!!' in output or 'INSTRUMENTATION_FAILED' in output or 'OK (' not in output:
+            raise AssertionError(test_class+' failed: '+output[-10000:])
+    for image in ['map-price-groups.png','map-price-group-list.png','map-price-selected-polish.png','map-price-style-positron.png',
+                  'map-price-selected-2d.png','map-price-selected-no-point.png','listing-map-preview.png','source-photos.png']:
+        (out / image).write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/'+image))
     # Run quick UI/data regressions before the natural 15-minute periodic check.
     subprocess.run(['python3','android/ci/closed-background.py'],check=True,timeout=1500)
     (out / 'AUTOMATIC-CHECK.png').write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/automatic-check.png'))
@@ -175,7 +184,7 @@ try:
         row = db.execute("SELECT data FROM state WHERE name='lastCheck'").fetchone()
         last = json.loads(row[0]) if row else {}
         extra = {}
-        for name in ['aiDeviceTest','screenOffTest','newSourcesTest','mapDeviceTest','selectedMapDeviceTest','automaticDeviceTest','combinedWorkspaceDeviceTest']:
+        for name in ['aiDeviceTest','screenOffTest','newSourcesTest','mapDeviceTest','selectedMapDeviceTest','automaticDeviceTest','combinedWorkspaceDeviceTest','sourcePhotosDeviceTest']:
             row = db.execute('SELECT data FROM state WHERE name=?',(name,)).fetchone()
             extra[name] = json.loads(row[0]) if row else {}
     (out / 'DEVICE-CHECKS.json').write_text(json.dumps(extra,indent=2))
@@ -189,7 +198,9 @@ try:
     print('Android 16 native startup, navigation and live search: PASS')
 except Exception as error:
     for image in ['map-native.png','map-selected.png','map-selected-no-coordinates.png',
-                  'combined-favorites.png','combined-tracking.png','combined-details.png','automatic-check.png']:
+                  'combined-favorites.png','combined-tracking.png','combined-details.png','combined-full-details.png','automatic-check.png',
+                  'map-price-groups.png','map-price-group-list.png','map-price-selected-polish.png','map-price-style-positron.png',
+                  'map-price-selected-2d.png','map-price-selected-no-point.png','listing-map-preview.png','source-photos.png']:
         try:
             (out / image).write_bytes(adb('exec-out','run-as','ua.domtrack.mobile','cat','files/'+image))
         except Exception:

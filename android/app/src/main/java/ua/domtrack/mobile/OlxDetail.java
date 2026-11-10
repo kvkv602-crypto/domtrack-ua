@@ -10,7 +10,7 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.*;
 import org.jsoup.select.Elements;
 
-/** Reads only a canonically bound visible public detail. It never loads scripts, photos or APIs. */
+/** Reads a canonically bound public detail and photo URLs without fetching images or scripts. */
 final class OlxDetail {
     private static IllegalArgumentException failure(String reason) {
         return new IllegalArgumentException("OLX: " + reason);
@@ -80,6 +80,7 @@ final class OlxDetail {
         );
         parameters(props, record);
         if (!description.isBlank()) Json.put(record, "description", description.substring(0, Math.min(18000, description.length())));
+        ListingPhotos.olxGallery(doc, record);
         Model.validate(record);
         return record;
     }
