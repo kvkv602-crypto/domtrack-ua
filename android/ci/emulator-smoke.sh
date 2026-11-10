@@ -145,7 +145,7 @@ try:
     (out / 'PUBLIC-READER.txt').write_text(reader_output)
     if reader.returncode != 0 or 'FAILURES!!!' in reader_output or 'INSTRUMENTATION_FAILED' in reader_output or 'OK (' not in reader_output:
         raise AssertionError('Public listing reader device tests failed: ' + reader_output[-10000:])
-    for test_class, report_name in [('CurrentSearchDeviceTest','CURRENT-SEARCH.txt'),('MapPriceDeviceTest','MAP-PRICE-GROUPS.txt'),('ListingMapPreviewDeviceTest','LISTING-MAP-PREVIEW.txt'),('RemotePhotosDeviceTest','REMOTE-PHOTOS.txt')]:
+    for test_class, report_name in [('CurrentSearchDeviceTest','CURRENT-SEARCH.txt'),('MapPriceDeviceTest','MAP-PRICE-GROUPS.txt'),('ListingMapPreviewDeviceTest','LISTING-MAP-PREVIEW.txt'),('RemotePhotosDeviceTest','REMOTE-PHOTOS.txt'),('RemDeviceTest','REM-SOURCE.txt')]:
         result = subprocess.run(['adb','shell','am','instrument','-w','-e','class','ua.domtrack.mobile.'+test_class,'ua.domtrack.mobile.test/androidx.test.runner.AndroidJUnitRunner'],capture_output=True,timeout=240)
         output = result.stdout.decode(errors='replace') + result.stderr.decode(errors='replace')
         (out / report_name).write_text(output)
@@ -184,7 +184,7 @@ try:
         row = db.execute("SELECT data FROM state WHERE name='lastCheck'").fetchone()
         last = json.loads(row[0]) if row else {}
         extra = {}
-        for name in ['aiDeviceTest','screenOffTest','newSourcesTest','mapDeviceTest','selectedMapDeviceTest','automaticDeviceTest','combinedWorkspaceDeviceTest','sourcePhotosDeviceTest']:
+        for name in ['aiDeviceTest','screenOffTest','newSourcesTest','mapDeviceTest','selectedMapDeviceTest','automaticDeviceTest','combinedWorkspaceDeviceTest','sourcePhotosDeviceTest','remDeviceTest']:
             row = db.execute('SELECT data FROM state WHERE name=?',(name,)).fetchone()
             extra[name] = json.loads(row[0]) if row else {}
     (out / 'DEVICE-CHECKS.json').write_text(json.dumps(extra,indent=2))

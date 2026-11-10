@@ -45,7 +45,7 @@ public class ClosedBackgroundDeviceTest {
             db.saveState("autoCheck", new JSONObject());
             db.saveState("searches", new JSONObject());
             db.saveState("settings", Json.object("background", true, "wifiOnly", false, "localAi", false));
-            JSONObject requested = Json.object("city", "Ірпінь", "kind", "apartment", "currency", "EUR");
+            JSONObject requested = Json.object("city", "Запоріжжя", "kind", "both", "currency", "EUR");
             db.saveState("currentFilters", requested);
             db.saveSearch(Json.object("id", "unrelated-paused-search", "name", "Unrelated paused search",
                 "enabled", false, "filters", Json.object("city", "Київ", "kind", "house")));
@@ -62,12 +62,12 @@ public class ClosedBackgroundDeviceTest {
             });
             assertTrue("Ordinary Search must register the latest query alongside paused saved searches",
                 db.searches().stream().anyMatch(search -> CurrentSearch.isCurrent(search)
-                    && search.optBoolean("enabled") && "Ірпінь".equals(search.optJSONObject("filters").optString("city"))));
+                    && search.optBoolean("enabled") && "Запоріжжя".equals(search.optJSONObject("filters").optString("city"))));
             long serviceDeadline = System.currentTimeMillis() + 15000L;
-            while (!db.state("activeSearch", new JSONObject()).optString("filters").contains("Ірпінь") &&
+            while (!db.state("activeSearch", new JSONObject()).optString("filters").contains("Запоріжжя") &&
                     System.currentTimeMillis() < serviceDeadline) Thread.sleep(100L);
             assertTrue("Explicit search must reach the foreground service",
-                db.state("activeSearch", new JSONObject()).optString("filters").contains("Ірпінь"));
+                db.state("activeSearch", new JSONObject()).optString("filters").contains("Запоріжжя"));
             if (SearchService.RUNNING.get()) instrumentation.runOnMainSync(() -> SearchService.stop(context));
             while (SearchService.RUNNING.get() && System.currentTimeMillis() < serviceDeadline) Thread.sleep(100L);
             assertFalse("Manual full search must stop before testing periodic work", SearchService.RUNNING.get());

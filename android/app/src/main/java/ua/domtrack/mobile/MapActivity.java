@@ -456,6 +456,7 @@ public class MapActivity extends Activity {
             case "rieltor" -> "Rieltor";
             case "lun" -> "LUN";
             case "flatfy" -> "Flatfy";
+            case "rem" -> "REM.UA";
             case "manual" -> "Вручную";
             default -> source.isBlank() ? "не указан" : source;
         };
@@ -823,6 +824,7 @@ public class MapActivity extends Activity {
             case "rieltor" -> "Rieltor";
             case "lun" -> "LUN";
             case "flatfy" -> "Flatfy";
+            case "rem" -> "REM.UA";
             case "manual" -> "Вручную";
             default -> record.optString("source");
         };

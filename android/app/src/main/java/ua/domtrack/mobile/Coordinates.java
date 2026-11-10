@@ -15,6 +15,7 @@ final class Coordinates {
 
     static JSONObject parse(String html, String url) {
         Document doc = Jsoup.parse(html, url);
+        if ("rem.ua".equals(URI.create(url).getHost())) return RemPage.detail(doc, url);
         List<JSONObject> ria = RiaPage.parse(doc, url);
         if (!ria.isEmpty() && ria.get(0).has("latitude")) return ria.get(0);
         Element canonical = doc.selectFirst("head link[rel=canonical]");

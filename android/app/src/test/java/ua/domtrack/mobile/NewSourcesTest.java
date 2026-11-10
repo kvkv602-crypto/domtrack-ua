@@ -266,11 +266,11 @@ public class NewSourcesTest {
     }
 
     @Test
-    public void sevenDistinctSitesAreRegisteredForZaporizhzhia() {
+    public void eightDistinctSitesAreRegisteredForZaporizhzhia() {
         Set<String> sources = new HashSet<>();
         for (Sources.Section s : Sources.sections("Запорожье", "apartment")) sources.add(s.source);
         assertEquals(
-            Set.of("rieltor", "domria-web", "obyava", "domik", "olx", "lun", "flatfy"),
+            Set.of("rieltor", "domria-web", "obyava", "domik", "olx", "lun", "flatfy", "rem"),
             sources
         );
     }

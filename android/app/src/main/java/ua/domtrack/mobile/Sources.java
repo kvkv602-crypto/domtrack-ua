@@ -95,6 +95,8 @@ final class Sources {
             .orElseThrow(() -> new IllegalArgumentException("Выберите город из списка"));
         for (String k : List.of("apartment", "house")) {
             if (!kind.equals("both") && !kind.equals(k)) continue;
+            Section rem = RemPage.section(city, row[1], k);
+            if (rem != null) out.add(rem);
             out.add(
                 new Section(
                     "rieltor",
@@ -377,6 +379,7 @@ final class Sources {
 
     static Result parse(String html, String pageUrl, Section s, int page) {
         Document doc = Jsoup.parse(html, pageUrl);
+        if (s.source.equals("rem")) return RemPage.parse(doc, pageUrl, s, page);
         if (s.source.equals("lun") || s.source.equals("flatfy")) return AggregatorPages.parse(
             doc,
             pageUrl,
@@ -710,6 +713,7 @@ final class Sources {
     static List<JSONObject> structured(String html, String url) {
         if (ListingLinks.olxHost(url)) return List.of(OlxDetail.parse(html, url, url, null));
         Document doc = Jsoup.parse(html, url);
+        if ("rem.ua".equals(URI.create(url).getHost())) return List.of(RemPage.detail(doc, url));
         List<JSONObject> out = new ArrayList<>(RiaPage.parse(doc, url));
         if (!out.isEmpty()) return out;
         // Generic JSON-LD can describe a recommended property. For RIA it must not be

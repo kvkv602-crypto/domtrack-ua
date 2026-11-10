@@ -63,7 +63,8 @@ public class SearchUpgradeTest {
 
     @Test
     public void movingWindowDoesNotFinishRieltorBeforePartialLastPage() {
-        Sources.Section s = Sources.sections("Запоріжжя", "apartment").get(0);
+        Sources.Section s = Sources.sections("Запоріжжя", "apartment").stream()
+            .filter(source -> source.source.equals("rieltor")).findFirst().orElseThrow();
         org.jsoup.nodes.Document doc = org.jsoup.Jsoup.parse(
             "<span data-listing-count>747 оголошень</span><ul class=pagination_custom><li class=active><a>37</a></li></ul>"
         );

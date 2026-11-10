@@ -111,7 +111,7 @@ public class RemotePhotosDeviceTest {
         List<JSONObject> listings = new ArrayList<>(db.listings());
         listings.sort(Comparator.comparingInt(row -> "rieltor".equals(row.optString("source")) ? 0 : 1));
         LinkedHashMap<String, JSONObject> distinct = new LinkedHashMap<>();
-        Set<String> publicSources = Set.of("rieltor", "olx", "domria-web", "domria", "lun", "flatfy", "domik", "obyava");
+        Set<String> publicSources = Set.of("rieltor", "olx", "domria-web", "domria", "lun", "flatfy", "domik", "obyava", "rem");
         for (JSONObject row : listings) {
             if (!publicSources.contains(row.optString("source"))) continue;
             List<String> urls = ListingPhotos.urls(row);

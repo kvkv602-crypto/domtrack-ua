@@ -213,6 +213,7 @@ public class MainActivity extends Activity {
             case "flatfy": return "Flatfy";
             case "obyava": return "OBYAVA";
             case "domik": return "Domik.ua";
+            case "rem": return "REM.UA";
             default: return source.isBlank() ? "Источник не указан" : source;
         }
     }
@@ -1367,12 +1368,14 @@ public class MainActivity extends Activity {
         LinearLayout content = column();
         List<Sources.Section> sections=Workspace.safeSourceSections(filters);
         if(sections.isEmpty())content.addView(text("Выбери город в фильтрах, чтобы увидеть состояние источников.",14,MUTED));
+        else if (sections.stream().noneMatch(section -> section.source.equals("rem")))
+            content.addView(text("REM.UA: для выбранного города открытый раздел пока не подключён.", 13, MUTED));
         for (Sources.Section section : sections) {
             JSONObject s = db.state("section:" + section.key(), new JSONObject());
             LinearLayout box = card();
             box.addView(
                 text(
-                    section.source + " · " + (section.kind.equals("house") ? "дома" : "квартиры"),
+                    sourceName(section.source) + " · " + (section.kind.equals("house") ? "дома" : "квартиры"),
                     17,
                     INK
                 )
@@ -1401,7 +1404,7 @@ public class MainActivity extends Activity {
             );
             if (section.source.equals("olx")) box.addView(
                 text(
-                    "OLX: экспериментальный адаптер публичных карточек. В контрольном запросе сайт ответил HTTP 403; результаты не гарантированы.",
+                    "Доступ к каталогу зависит от ограничений OLX. Если сайт не отдаёт данные, причина будет показана в результате проверки.",
                     13,
                     MUTED
                 )
@@ -1411,7 +1414,7 @@ public class MainActivity extends Activity {
         }
         content.addView(
             text(
-                "Rieltor — города списка; LUN и Flatfy — 22 областных центра; DOM.RIA, OBYAVA, Domik и экспериментальный OLX — Запорожье. Flatfy обходит доступные страницы. LUN может оставаться частичным. Цены агрегаторов и исходных площадок имеют отдельную историю; одинаковые исходные ссылки объединяются в результатах с минимальной сопоставимой ценой. Это не весь интернет.",
+                "Rieltor — города списка; REM.UA — 21 город с открытыми разделами; LUN и Flatfy — 22 областных центра; DOM.RIA, OBYAVA, Domik и OLX — Запорожье. Обход зависит от доступности страниц площадки. LUN может оставаться частичным. Цены агрегаторов и исходных площадок имеют отдельную историю; одинаковые исходные ссылки объединяются в результатах с минимальной сопоставимой ценой. Полнота всего Интернета не подтверждена.",
                 13,
                 MUTED
             )
