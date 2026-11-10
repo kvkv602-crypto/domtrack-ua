@@ -119,11 +119,16 @@ public class CombinedWorkspaceDeviceTest {
                 assertNotNull(find(view,"Позвонить: +380000000000"));
                 assertTrue(containsText(view,"Светлая квартира"));
                 assertTrue(containsText(view,"Балкон и отдельная кухня."));
+                assertNotNull(find(view,"Светлая квартира\nБалкон и отдельная кухня."));
                 assertTrue(containsText(view,"Этажей в доме: 5"));
                 assertTrue(containsText(view,"Тестовая улица, 12"));
             } catch(Exception e) { throw new AssertionError(e); }
         });
-        assertTrue(UiDevice.getInstance(instrumentation()).takeScreenshot(new File(activity.getFilesDir(),"combined-full-details.png")));
+        instrumentation().waitForIdleSync();
+        UiDevice device=UiDevice.getInstance(instrumentation());
+        assertTrue(device.wait(Until.hasObject(By.text("Объект")),5000));
+        device.waitForIdle();
+        assertTrue(device.takeScreenshot(new File(activity.getFilesDir(),"combined-full-details.png")));
     }
 
     private boolean containsText(View root,String text) {

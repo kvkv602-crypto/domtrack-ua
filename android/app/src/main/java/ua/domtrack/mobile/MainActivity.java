@@ -858,7 +858,9 @@ public class MainActivity extends Activity {
         content.addView(text("Город: " + r.optString("city") +
             (r.optString("district").isBlank() ? "" : "\nРайон: " + r.optString("district")) +
             "\nПродавец: " + sellerName(r.optString("sellerType")), 14, INK));
-        String description = org.jsoup.Jsoup.parse(r.optString("description").replace("\n", "<br>")).wholeText().trim();
+        org.jsoup.nodes.Document descriptionDocument = org.jsoup.Jsoup.parse(r.optString("description").replace("\n", "<br>"));
+        descriptionDocument.select("p,div,li,blockquote,h1,h2,h3,h4").append("<br>");
+        String description = descriptionDocument.wholeText().replaceAll("\n{3,}", "\n\n").trim();
         if (!description.isBlank()) {
             content.addView(badge("Описание"));
             content.addView(text(description, 15, INK));
