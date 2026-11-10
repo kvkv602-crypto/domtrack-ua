@@ -810,7 +810,7 @@ public class MapActivity extends Activity {
                 record.optDouble("price"), originalCurrency);
         String address = record.optString("address").trim();
         if (address.isEmpty()) address = record.optString("title");
-            if (!record.optString("city").isBlank()) address = record.optString("city") + " · " + address;
+        if (!record.optString("city").isBlank()) address = record.optString("city") + " · " + address;
         ArrayList<String> facts = new ArrayList<>();
         if (record.optInt("rooms") > 0) facts.add(record.optInt("rooms") + " комн.");
         if (record.optDouble("area", 0) > 0) facts.add(new java.text.DecimalFormat("0.#")
@@ -818,7 +818,7 @@ public class MapActivity extends Activity {
         if (record.optInt("floor") > 0) facts.add("этаж " + record.optInt("floor") +
             (record.optInt("floorsTotal") > 0 ? "/" + record.optInt("floorsTotal") : ""));
         String source = switch (record.optString("source")) {
-                case "domria", "domria-web", "ria" -> "DIM.RIA";
+            case "domria", "domria-web", "ria" -> "DIM.RIA";
             case "olx" -> "OLX";
             case "rieltor" -> "Rieltor";
             case "lun" -> "LUN";
