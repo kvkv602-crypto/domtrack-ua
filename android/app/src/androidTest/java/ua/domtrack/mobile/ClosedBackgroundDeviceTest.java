@@ -56,6 +56,7 @@ public class ClosedBackgroundDeviceTest {
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK));
             java.lang.reflect.Method start = MainActivity.class.getDeclaredMethod("startScan", boolean.class);
             start.setAccessible(true);
+            String previousSearchAt = db.state("activeSearch", new JSONObject()).optString("at");
             instrumentation.runOnMainSync(() -> {
                 try { start.invoke(main, true); }
                 catch (Exception error) { throw new AssertionError(error); }
@@ -64,8 +65,11 @@ public class ClosedBackgroundDeviceTest {
                 db.searches().stream().anyMatch(search -> CurrentSearch.isCurrent(search)
                     && search.optBoolean("enabled") && "Запоріжжя".equals(search.optJSONObject("filters").optString("city"))));
             long serviceDeadline = System.currentTimeMillis() + 15000L;
-            while (!db.state("activeSearch", new JSONObject()).optString("filters").contains("Запоріжжя") &&
+            while ((previousSearchAt.equals(db.state("activeSearch", new JSONObject()).optString("at")) ||
+                    !db.state("activeSearch", new JSONObject()).optString("filters").contains("Запоріжжя")) &&
                     System.currentTimeMillis() < serviceDeadline) Thread.sleep(100L);
+            assertNotEquals("The test must observe this service start, rather than an earlier search in the same city",
+                previousSearchAt, db.state("activeSearch", new JSONObject()).optString("at"));
             assertTrue("Explicit search must reach the foreground service",
                 db.state("activeSearch", new JSONObject()).optString("filters").contains("Запоріжжя"));
             if (SearchService.RUNNING.get()) instrumentation.runOnMainSync(() -> SearchService.stop(context));
